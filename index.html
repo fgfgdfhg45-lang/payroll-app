@@ -462,9 +462,16 @@
     transition:border-color .12s ease, transform .12s ease;
   }
   .archive-box:hover{border-color:var(--orange);transform:translateY(-2px);}
+  .archive-box{position:relative;}
   .archive-box .ic{font-size:30px;margin-bottom:8px;}
   .archive-box .lbl{font-weight:bold;color:var(--navy);font-size:14px;}
   .archive-box .cnt{font-size:11.5px;color:var(--muted);margin-top:4px;}
+  .archive-box .arc-del{
+    position:absolute;top:8px;left:8px;
+    opacity:0.35;font-size:12px;padding:3px 7px;border-radius:6px;
+    color:var(--warn);
+  }
+  .archive-box .arc-del:hover{opacity:1;background:rgba(192,57,43,0.1);}
   .archive-current-banner{
     background:#fff7ec;
     border:1.5px dashed var(--orange);
@@ -1586,11 +1593,33 @@ async function renderArchiveGrid(){
       const data = JSON.parse(raw);
       const box = document.createElement('div');
       box.className = 'archive-box';
-      box.innerHTML = `<div class="ic">📋</div><div class="lbl">${escapeHtml(data.label)}</div><div class="cnt">${data.workers.length} عامل</div>`;
+      box.innerHTML = `<span class="arc-del" title="حذف الكشف">✕</span><div class="ic">📋</div><div class="lbl">${escapeHtml(data.label)}</div><div class="cnt">${data.workers.length} عامل</div>`;
+      box.querySelector('.arc-del').onclick = (e) => {
+        e.stopPropagation();
+        deleteArchiveMonth(key, data.label);
+      };
       box.onclick = () => openArchive(key);
       grid.appendChild(box);
     }catch(e){}
   }
+}
+
+// حذف كشف من الأرشيف — لازم تلت تأكيدات متتالية عشان نضمن إنه مش حذف بالغلط
+async function deleteArchiveMonth(key, label){
+  if(!confirm(`تأكيد 1 من 3:\nهل تريد حذف كشف "${label}" من الأرشيف؟`)) return;
+  if(!confirm(`تأكيد 2 من 3:\nهذا الإجراء لا يمكن التراجع عنه. متأكد إنك عايز تحذف "${label}"؟`)) return;
+  const typed = prompt(`تأكيد 3 من 3 (الأخير):\nاكتب اسم الشهر بالظبط زي ما هو ظاهر عشان تأكد الحذف النهائي:\n"${label}"`);
+  if(typed === null) return;
+  if(typed.trim() !== label.trim()){
+    alert('الكتابة مش مطابقة، تم إلغاء الحذف.');
+    return;
+  }
+  await storeDelete('archive:' + key);
+  let index = await getArchiveIndex();
+  index = index.filter(k => k !== key);
+  await storeSet('archives-list', JSON.stringify(index));
+  alert(`تم حذف كشف "${label}" نهائياً.`);
+  renderArchiveGrid();
 }
 
 async function openArchive(key){

@@ -472,13 +472,6 @@
     color:var(--warn);
   }
   .archive-box .arc-del:hover{opacity:1;background:rgba(192,57,43,0.1);}
-  .archive-box .arc-days{font-size:10px;color:var(--warn);margin-top:3px;}
-  .archive-box .arc-restore{
-    margin-top:10px;width:100%;
-    background:var(--good);color:#fff;border:none;border-radius:7px;
-    padding:6px 8px;font-size:11.5px;cursor:pointer;
-  }
-  .archive-box .arc-restore:hover{opacity:0.9;}
   .archive-current-banner{
     background:#fff7ec;
     border:1.5px dashed var(--orange);
@@ -583,7 +576,6 @@
   <div class="topbtns">
     <button class="secondary" id="backBtn" style="display:none;">⟵ رجوع للعمال</button>
     <button class="secondary" id="archiveBtn">📁 الأرشيف</button>
-    <button class="secondary" id="trashBtn">🗑 المحذوفات</button>
     <button class="secondary" id="rolloverBtn">ترحيل الأرصدة للشهر الجديد</button>
     <button id="updateBtn">تحديث القبض</button>
     <button class="logout-btn" id="logoutBtn" title="تسجيل الخروج">⏻ خروج</button>
@@ -632,17 +624,6 @@
         <div id="archiveDetailContainer"></div>
       </div>
     </div>
-
-    <div class="archive-screen" id="trashScreen">
-      <div class="cards-toolbar">
-        <button class="ghost" id="closeTrashBtn">⟵ رجوع</button>
-        <span style="font-size:13px;color:var(--muted);">أي عنصر هنا بيتمسح نهائيًا تلقائيًا بعد 30 يوم من تاريخ حذفه</span>
-      </div>
-      <h3 style="font-size:13px;color:var(--muted);margin:6px 0 10px;">👤 عمال محذوفين</h3>
-      <div class="archive-grid" id="trashWorkersGrid"></div>
-      <h3 style="font-size:13px;color:var(--muted);margin:22px 0 10px;">📋 كشوف أرشيف محذوفة</h3>
-      <div class="archive-grid" id="trashArchivesGrid"></div>
-    </div>
   </main>
 </div>
 </div><!-- /#appRoot -->
@@ -686,8 +667,13 @@ const DELETE_WORKER_PASSWORD = 'شافعي2024';
 let firestoreDb = null;
 let currentUid = null;
 
+// ملحوظة مهمة: مسار التخزين هنا ثابت (payroll_app) ومش معتمد على UID بتاع
+// حساب تسجيل الدخول، عشان لو الحساب اتمسح واتعمل من جديد في Authentication
+// (حتى لو بنفس الإيميل)، الداتا متضيعش تاني لإن Firebase بيدي UID جديد كل مرة.
+// الحماية الحقيقية بقت شغالة من خلال قواعد Firestore (email == الإيميل المصرح له)
+// مش من خلال مطابقة UID.
 function fsDocRef(key){
-  return firestoreDb.collection('users').doc(currentUid).collection('payroll').doc(key);
+  return firestoreDb.collection('payroll_app').doc(key);
 }
 
 async function storeGet(key){
@@ -758,7 +744,6 @@ async function loadAll(){
   }
   if(workers.length > 0){ activeId = workers[0].id; }
   await loadSettings();
-  purgeExpiredTrash();
   renderSidebar();
   renderForm();
 }
@@ -857,9 +842,6 @@ function computeDay(dateKey, rec){
         if(outM < inM) outM += 24*60; // انصراف بعد نص الليل
         if(outM > endM){
           overtimeMinutes = outM - endM;
-        } else if(outM < endM){
-          // مشي قبل معاد الانصراف الرسمي — الفرق ده بيتحسب تأخير (زيادة على تأخير الحضور لو موجود)
-          lateMinutes += (endM - outM);
         }
       }
     }
@@ -928,144 +910,6 @@ async function saveWorker(w){
 
 async function deleteWorkerStorage(id){
   await storeDelete('worker:' + id);
-}
-
-// ===== سلة محذوفات العمال (استرجاع خلال 30 يوم) =====
-const TRASH_RETENTION_DAYS = 30;
-const TRASH_RETENTION_MS = TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-
-async function getWorkerTrashIndex(){
-  try{ const raw = await storeGet('trash-workers-list'); return raw ? JSON.parse(raw) : []; }catch(e){ return []; }
-}
-async function saveWorkerTrashIndex(idx){ await storeSet('trash-workers-list', JSON.stringify(idx)); }
-
-// بينقل العامل لسلة المحذوفات بدل ما يتمسح نهائي على طول — بيفضل موجود في
-// التخزين مع تاريخ الحذف، وبيتشال بس من قائمة العمال النشطين.
-async function softDeleteWorker(id){
-  const w = workers.find(x => x.id === id);
-  if(!w) return;
-  w.deletedAt = Date.now();
-  await saveWorker(w);
-  workers = workers.filter(x => x.id !== id);
-  await saveWorkerList();
-  const idx = await getWorkerTrashIndex();
-  if(!idx.includes(id)){ idx.push(id); await saveWorkerTrashIndex(idx); }
-}
-
-async function restoreWorker(id){
-  const raw = await storeGet('worker:' + id);
-  if(!raw){ alert('العامل ده اتمسح نهائيًا بعد انتهاء مدة الـ 30 يوم ومينفعش استرجاعه.'); renderTrashScreen(); return; }
-  const w = JSON.parse(raw);
-  delete w.deletedAt;
-  await saveWorker(w);
-  workers.push(w);
-  await saveWorkerList();
-  let idx = await getWorkerTrashIndex();
-  idx = idx.filter(x => x !== id);
-  await saveWorkerTrashIndex(idx);
-  activeId = w.id;
-  renderTrashScreen();
-  renderSidebar();
-}
-
-// ===== سلة محذوفات الأرشيف (استرجاع خلال 30 يوم) =====
-async function getArchiveTrashIndex(){
-  try{ const raw = await storeGet('trash-archives-list'); return raw ? JSON.parse(raw) : []; }catch(e){ return []; }
-}
-async function saveArchiveTrashIndex(idx){ await storeSet('trash-archives-list', JSON.stringify(idx)); }
-
-async function restoreArchiveMonth(key){
-  const raw = await storeGet('archive:' + key);
-  if(!raw){ alert('الكشف ده اتمسح نهائيًا بعد انتهاء مدة الـ 30 يوم ومينفعش استرجاعه.'); renderTrashScreen(); return; }
-  const data = JSON.parse(raw);
-  delete data.deletedAt;
-  await storeSet('archive:' + key, JSON.stringify(data));
-  let trashIdx = await getArchiveTrashIndex();
-  trashIdx = trashIdx.filter(k => k !== key);
-  await saveArchiveTrashIndex(trashIdx);
-  let idx = await getArchiveIndex();
-  if(!idx.includes(key)){ idx.push(key); await storeSet('archives-list', JSON.stringify(idx)); }
-  renderTrashScreen();
-}
-
-// بتتنفذ مرة كل ما البرنامج يفتح — بتمسح نهائيًا أي حاجة في السلة عدّت عليها 30 يوم
-async function purgeExpiredTrash(){
-  const now = Date.now();
-  let wIdx = await getWorkerTrashIndex();
-  let wChanged = false;
-  for(const id of [...wIdx]){
-    const raw = await storeGet('worker:' + id);
-    if(!raw){ wIdx = wIdx.filter(x => x !== id); wChanged = true; continue; }
-    const w = JSON.parse(raw);
-    if(w.deletedAt && (now - w.deletedAt) > TRASH_RETENTION_MS){
-      await storeDelete('worker:' + id);
-      wIdx = wIdx.filter(x => x !== id);
-      wChanged = true;
-    }
-  }
-  if(wChanged) await saveWorkerTrashIndex(wIdx);
-
-  let aIdx = await getArchiveTrashIndex();
-  let aChanged = false;
-  for(const key of [...aIdx]){
-    const raw = await storeGet('archive:' + key);
-    if(!raw){ aIdx = aIdx.filter(x => x !== key); aChanged = true; continue; }
-    const data = JSON.parse(raw);
-    if(data.deletedAt && (now - data.deletedAt) > TRASH_RETENTION_MS){
-      await storeDelete('archive:' + key);
-      aIdx = aIdx.filter(x => x !== key);
-      aChanged = true;
-    }
-  }
-  if(aChanged) await saveArchiveTrashIndex(aIdx);
-}
-
-function daysRemainingLabel(deletedAt){
-  const elapsed = Date.now() - (deletedAt || 0);
-  const remaining = Math.max(0, Math.ceil((TRASH_RETENTION_MS - elapsed) / (24*60*60*1000)));
-  return remaining <= 0 ? 'هيتمسح نهائي قريب جداً' : ('باقي ' + remaining + ' يوم على الحذف النهائي');
-}
-
-async function renderTrashScreen(){
-  const wGrid = $('#trashWorkersGrid');
-  const aGrid = $('#trashArchivesGrid');
-  if(!wGrid || !aGrid) return;
-  wGrid.innerHTML = '<div class="empty-state">جاري التحميل...</div>';
-  aGrid.innerHTML = '<div class="empty-state">جاري التحميل...</div>';
-
-  const wIdx = await getWorkerTrashIndex();
-  wGrid.innerHTML = '';
-  if(wIdx.length === 0){
-    wGrid.innerHTML = '<div class="empty-state" style="padding:20px;">مفيش عمال محذوفين حاليًا</div>';
-  } else {
-    for(const id of wIdx){
-      const raw = await storeGet('worker:' + id);
-      if(!raw) continue;
-      const w = JSON.parse(raw);
-      const box = document.createElement('div');
-      box.className = 'archive-box';
-      box.innerHTML = `<div class="ic">👤</div><div class="lbl">${escapeHtml(w.name || 'بدون اسم')}</div><div class="arc-days">${daysRemainingLabel(w.deletedAt)}</div><button class="arc-restore">↩ استرجاع</button>`;
-      box.querySelector('.arc-restore').onclick = () => restoreWorker(id);
-      wGrid.appendChild(box);
-    }
-  }
-
-  const aIdx = await getArchiveTrashIndex();
-  aGrid.innerHTML = '';
-  if(aIdx.length === 0){
-    aGrid.innerHTML = '<div class="empty-state" style="padding:20px;">مفيش كشوفات أرشيف محذوفة حاليًا</div>';
-  } else {
-    for(const key of aIdx){
-      const raw = await storeGet('archive:' + key);
-      if(!raw) continue;
-      const data = JSON.parse(raw);
-      const box = document.createElement('div');
-      box.className = 'archive-box';
-      box.innerHTML = `<div class="ic">📋</div><div class="lbl">${escapeHtml(data.label)}</div><div class="arc-days">${daysRemainingLabel(data.deletedAt)}</div><button class="arc-restore">↩ استرجاع</button>`;
-      box.querySelector('.arc-restore').onclick = () => restoreArchiveMonth(key);
-      aGrid.appendChild(box);
-    }
-  }
 }
 
 function parseTimeSum(text){
@@ -1178,14 +1022,16 @@ function renderSidebar(){
     });
     div.querySelector('.del').onclick = async (e) => {
       e.stopPropagation();
-      if(!confirm('هل تريد نقل هذا العامل إلى سلة المحذوفات؟ هتقدر تسترجعه خلال 30 يوم من تاريخ الحذف.')) return;
+      if(!confirm('هل تريد حذف هذا العامل؟')) return;
       const entered = prompt('اكتب كلمة السر لتأكيد حذف العامل:');
       if(entered === null) return; // المستخدم دوس إلغاء
       if(entered !== DELETE_WORKER_PASSWORD){
         alert('كلمة السر غلط. لم يتم الحذف.');
         return;
       }
-      await softDeleteWorker(w.id);
+      await deleteWorkerStorage(w.id);
+      workers = workers.filter(x => x.id !== w.id);
+      await saveWorkerList();
       if(activeId === w.id) activeId = workers.length ? workers[0].id : null;
       renderAll();
     };
@@ -1356,7 +1202,6 @@ function renderAttendanceTable(w){
     </div>
     <div class="hint" style="margin-bottom:10px;">
       التوقيت الرسمي الحالي: ${settings.season === 'winter' ? 'شتوي — دخول 8ص، انصراف 5م' : 'صيفي — دخول 9ص، انصراف 6م'} (يوم الخميس 🕓 مختصر: انصراف ${settings.season === 'winter' ? '3م' : '4م'}) — سماحية تأخير 15 دقيقة.
-      لو العامل مشى قبل معاد الانصراف الرسمي، الفرق بيتحسب تأخير تلقائي زي تأخير الحضور بالظبط (مفيش سماحية للمشي بدري).<br>
       تقدر تغيّر التوقيت من لوحة "تسجيل سريع" في القائمة الجانبية.<br>
       عمود "الحالة اليدوية": لو مسجّلتش حضور/انصراف لعامل والبرنامج حطّه غياب غلط، اختار "حاضر (يدوي)" وهيتشال الغياب فوراً — وبالعكس لو عايز تحط غياب بإيدك اختار "غياب (يدوي)".<br>
       🕌 يوم الجمعة "راحة أسبوعية" تلقائية (مش إجازة رسمية بأجر) — مش بتتحسب غياب ولا تأخير ومش بتضيف فلوس زيادة. لو العامل اشتغل فعلاً يوم جمعة، سجّل له حضور/انصراف عادي وكل وقت شغله هيتحسب "إضافي" بالكامل من غير أي حساب تأخير.
@@ -1619,14 +1464,13 @@ function updateComputedOnly(w){
   }
 }
 
-let currentScreen = 'form'; // 'form' | 'cards' | 'archive' | 'trash'
+let currentScreen = 'form'; // 'form' | 'cards' | 'archive'
 
 function renderAll(){
   renderSidebar();
   $('#formScreen').style.display = 'none';
   $('#cardsScreen').style.display = 'none';
   $('#archiveScreen').style.display = 'none';
-  $('#trashScreen').style.display = 'none';
   $('#backBtn').style.display = 'none';
 
   if(currentScreen === 'cards'){
@@ -1634,9 +1478,6 @@ function renderAll(){
     $('#backBtn').style.display = 'inline-block';
   } else if(currentScreen === 'archive'){
     $('#archiveScreen').style.display = 'block';
-    $('#backBtn').style.display = 'inline-block';
-  } else if(currentScreen === 'trash'){
-    $('#trashScreen').style.display = 'block';
     $('#backBtn').style.display = 'inline-block';
   } else {
     $('#formScreen').style.display = 'block';
@@ -1770,25 +1611,19 @@ async function renderArchiveGrid(){
 
 // حذف كشف من الأرشيف — لازم تلت تأكيدات متتالية عشان نضمن إنه مش حذف بالغلط
 async function deleteArchiveMonth(key, label){
-  if(!confirm(`تأكيد 1 من 3:\nهل تريد نقل كشف "${label}" إلى سلة المحذوفات؟`)) return;
-  if(!confirm(`تأكيد 2 من 3:\nهتقدر تسترجعه خلال 30 يوم بس من زرار "🗑 المحذوفات"، وبعد كده هيتمسح نهائي تلقائي. متأكد؟`)) return;
-  const typed = prompt(`تأكيد 3 من 3 (الأخير):\nاكتب اسم الشهر بالظبط زي ما هو ظاهر عشان تأكد النقل لسلة المحذوفات:\n"${label}"`);
+  if(!confirm(`تأكيد 1 من 3:\nهل تريد حذف كشف "${label}" من الأرشيف؟`)) return;
+  if(!confirm(`تأكيد 2 من 3:\nهذا الإجراء لا يمكن التراجع عنه. متأكد إنك عايز تحذف "${label}"؟`)) return;
+  const typed = prompt(`تأكيد 3 من 3 (الأخير):\nاكتب اسم الشهر بالظبط زي ما هو ظاهر عشان تأكد الحذف النهائي:\n"${label}"`);
   if(typed === null) return;
   if(typed.trim() !== label.trim()){
     alert('الكتابة مش مطابقة، تم إلغاء الحذف.');
     return;
   }
-  const raw = await storeGet('archive:' + key);
-  if(!raw) return;
-  const data = JSON.parse(raw);
-  data.deletedAt = Date.now();
-  await storeSet('archive:' + key, JSON.stringify(data));
+  await storeDelete('archive:' + key);
   let index = await getArchiveIndex();
   index = index.filter(k => k !== key);
   await storeSet('archives-list', JSON.stringify(index));
-  let trashIdx = await getArchiveTrashIndex();
-  if(!trashIdx.includes(key)){ trashIdx.push(key); await saveArchiveTrashIndex(trashIdx); }
-  alert(`تم نقل كشف "${label}" إلى سلة المحذوفات. تقدر تسترجعه خلال 30 يوم.`);
+  alert(`تم حذف كشف "${label}" نهائياً.`);
   renderArchiveGrid();
 }
 
@@ -1863,16 +1698,6 @@ $('#closeArchiveBtn').addEventListener('click', () => {
 $('#backToArchiveListBtn').addEventListener('click', () => {
   $('#archiveListView').style.display = 'block';
   $('#archiveDetailView').style.display = 'none';
-});
-
-$('#trashBtn').addEventListener('click', () => {
-  currentScreen = 'trash';
-  renderAll();
-  renderTrashScreen();
-});
-$('#closeTrashBtn').addEventListener('click', () => {
-  currentScreen = 'form';
-  renderAll();
 });
 
 let totalHidden = false;

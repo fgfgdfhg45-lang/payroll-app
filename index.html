@@ -822,7 +822,7 @@ function computeDay(dateKey, rec){
   const hrs = officialHoursForDate(dateKey);
   const startM = timeToMinutes(hrs.start);
   const endM = timeToMinutes(hrs.end);
-  let lateMinutes = 0, overtimeMinutes = 0, isAbsent = false;
+  let lateMinutes = 0, overtimeMinutes = 0, earlyLeaveMinutes = 0, isAbsent = false;
 
   if(rec.in){
     const inM = timeToMinutes(rec.in);
@@ -843,6 +843,10 @@ function computeDay(dateKey, rec){
         if(outM < inM) outM += 24*60; // انصراف بعد نص الليل
         if(outM > endM){
           overtimeMinutes = outM - endM;
+        } else if(outM < endM){
+          // مشي قبل معاد انتهاء الدوام الرسمي (4 يوم الخميس، 6 باقي الأيام) —
+          // الفرق بين معاد الانصراف الرسمي ووقت انصرافه الفعلي بيتخصم زي التأخير بالظبط.
+          earlyLeaveMinutes = endM - outM;
         }
       }
     }
@@ -857,7 +861,7 @@ function computeDay(dateKey, rec){
     }
   }
   if(rec.absentManual === true) isAbsent = true;
-  return { lateMinutes, overtimeMinutes, isAbsent, holiday:false, weeklyOff:false };
+  return { lateMinutes, overtimeMinutes, earlyLeaveMinutes, isAbsent, holiday:false, weeklyOff:false };
 }
 
 let attMonthOffset = 0; // 0 = الشهر الحالي، -1 = الشهر اللي فات، وهكذا
@@ -891,7 +895,8 @@ function computeMonthlyAttendance(w, offset = 0){
     const rec = (w.dailyLog && w.dailyLog[key]) || {};
     const c = computeDay(key, rec);
     if(!c.holiday){
-      totalLateMin += c.lateMinutes;
+      // مغادرة مبكرة بتتخصم بنفس منطق التأخير (ساعات ناقصة من الدوام الرسمي)
+      totalLateMin += c.lateMinutes + (c.earlyLeaveMinutes || 0);
       totalOTMin += c.overtimeMinutes;
       if(c.isAbsent) absentDays++;
     }
@@ -1120,6 +1125,7 @@ function computeStatusHtml(c, isFri){
   } else {
     const bits = [];
     if(c.lateMinutes > 0) bits.push(`<span class="att-status late">تأخير ${hmLabel(c.lateMinutes)}</span>`);
+    if(c.earlyLeaveMinutes > 0) bits.push(`<span class="att-status late">مغادرة مبكرة ${hmLabel(c.earlyLeaveMinutes)}</span>`);
     if(c.overtimeMinutes > 0) bits.push(`<span class="att-status ot">إضافي ${hmLabel(c.overtimeMinutes)}</span>`);
     if(bits.length === 0 && isFri){
       return `<span class="att-status ot">يوم إضافي</span>`;

@@ -1732,7 +1732,10 @@ function startApp(){
 
 // ===================== Auth gate =====================
 (function(){
-  const ALLOWED_EMAIL = 'fgfgdfhg315@gmail.com';
+  // ضيف أي إيميل جديد هنا بنفس الطريقة (بين علامتي تنصيص وفاصلة بعده)
+  const ALLOWED_EMAILS = [
+    'fgfgdfhg315@gmail.com'
+  ];
 
   const firebaseConfig = {
     apiKey: "AIzaSyDykzp2_4SJr7DjLkAmvHFSnCxXs_Ee9L0",
@@ -1800,7 +1803,7 @@ function startApp(){
   });
 
   auth.onAuthStateChanged((user) => {
-    if(user && user.email && user.email.toLowerCase() === ALLOWED_EMAIL){
+    if(user && user.email && ALLOWED_EMAILS.includes(user.email.toLowerCase())){
       setLoading(false);
       clearError();
       currentUid = user.uid;

@@ -1803,27 +1803,19 @@ function startApp(){
   });
 
   auth.onAuthStateChanged((user) => {
-    if(user && user.email && ALLOWED_EMAILS.includes(user.email.toLowerCase())){
-      setLoading(false);
-      clearError();
-      currentUid = user.uid;
-      gate.style.display = 'none';
-      appRoot.style.display = 'block';
-      if(!appStarted){
-        appStarted = true;
+    // ملحوظة: الحماية بالإيميل اتشالت مؤقتًا. البرنامج بيفتح لأي حد عنده الرابط.
+    setLoading(false);
+    clearError();
+    gate.style.display = 'none';
+    appRoot.style.display = 'block';
+    currentUid = (user && user.uid) ? user.uid : 'public';
+    if(!appStarted){
+      appStarted = true;
+      if(user){
         migrateLocalDataToFirestoreIfNeeded().finally(startApp);
+      } else {
+        startApp();
       }
-    } else if(user){
-      // حساب مسجل دخول بس مش الحساب المصرح له
-      setLoading(false);
-      appRoot.style.display = 'none';
-      gate.style.display = 'flex';
-      showError('هذا الحساب غير مصرح له بالدخول على البرنامج ده.');
-      auth.signOut();
-    } else {
-      setLoading(false);
-      appRoot.style.display = 'none';
-      gate.style.display = 'flex';
     }
   });
 })();

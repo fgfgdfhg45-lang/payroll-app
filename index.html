@@ -205,6 +205,16 @@
     font-size:11.5px;
     direction:ltr;
   }
+  table.att-table input.att-manual-hours{
+    width:60px;
+    padding:4px 5px;
+    border:1.5px solid var(--line);
+    border-radius:7px;
+    font-size:11.5px;
+    direction:ltr;
+    text-align:center;
+  }
+  table.att-table input.att-manual-hours::placeholder{color:var(--muted);}
   .att-status{font-size:11px;font-weight:bold;}
   .att-status.late{color:var(--warn);}
   .att-status.ot{color:var(--good);}
@@ -835,18 +845,35 @@ function computeDay(dateKey, rec){
         overtimeMinutes = Math.max(0, outM - inM);
       }
     } else {
-      if((inM - startM) > GRACE_MIN){
-        lateMinutes = inM - startM;
-      }
-      if(rec.out){
-        let outM = timeToMinutes(rec.out);
-        if(outM < inM) outM += 24*60; // انصراف بعد نص الليل
-        if(outM > endM){
-          overtimeMinutes = outM - endM;
-        } else if(outM < endM){
-          // مشي قبل معاد انتهاء الدوام الرسمي (4 يوم الخميس، 6 باقي الأيام) —
-          // الفرق بين معاد الانصراف الرسمي ووقت انصرافه الفعلي بيتخصم زي التأخير بالظبط.
-          earlyLeaveMinutes = endM - outM;
+      const manualHours = parseFloat(rec.manualLateHours);
+      const hasManualOverride = rec.manualLateHours !== undefined && rec.manualLateHours !== '' && !isNaN(manualHours);
+      if(hasManualOverride){
+        // تجاوز يدوي: المستخدم كتب بنفسه عدد ساعات الخصم (تأخير/مغادرة مبكرة) بدل
+        // ما البرنامج يحسبها تلقائي من فرق وقت الحضور/الانصراف عن الدوام الرسمي —
+        // ده مفيد جدًا لو العامل شغال في وردية مختلفة (مسائي/سهر) والدوام الرسمي
+        // المسجل في الإعدادات بتاع وردية صباحية، عشان منخصمش منه غلط.
+        lateMinutes = Math.max(0, Math.round(manualHours * 60));
+        if(rec.out){
+          let outM = timeToMinutes(rec.out);
+          if(outM < inM) outM += 24*60;
+          if(outM > endM){
+            overtimeMinutes = outM - endM;
+          }
+        }
+      } else {
+        if((inM - startM) > GRACE_MIN){
+          lateMinutes = inM - startM;
+        }
+        if(rec.out){
+          let outM = timeToMinutes(rec.out);
+          if(outM < inM) outM += 24*60; // انصراف بعد نص الليل
+          if(outM > endM){
+            overtimeMinutes = outM - endM;
+          } else if(outM < endM){
+            // مشي قبل معاد انتهاء الدوام الرسمي (4 يوم الخميس، 6 باقي الأيام) —
+            // الفرق بين معاد الانصراف الرسمي ووقت انصرافه الفعلي بيتخصم زي التأخير بالظبط.
+            earlyLeaveMinutes = endM - outM;
+          }
         }
       }
     }
@@ -1148,8 +1175,10 @@ function refreshAttendanceRow(w, key){
 
   const inEl = document.getElementById('att-in-' + key);
   const outEl = document.getElementById('att-out-' + key);
+  const manualHoursEl = document.getElementById('att-manualhours-' + key);
   if(inEl) inEl.disabled = !!rec.holiday;
   if(outEl) outEl.disabled = !!rec.holiday;
+  if(manualHoursEl) manualHoursEl.disabled = !!rec.holiday;
 
   const att = computeMonthlyAttendance(w, attMonthOffset);
   const lateEl = document.getElementById('attSummaryLate');
@@ -1166,7 +1195,7 @@ function renderAttendanceTable(w){
   const monthTitle = MONTH_NAMES[base.getMonth()] + ' ' + base.getFullYear();
   let rowsHtml = '';
   if(att.rows.length === 0){
-    rowsHtml = `<tr><td colspan="5" style="color:var(--muted);padding:14px;">مفيش أيام مسجلة في الشهر ده</td></tr>`;
+    rowsHtml = `<tr><td colspan="6" style="color:var(--muted);padding:14px;">مفيش أيام مسجلة في الشهر ده</td></tr>`;
   }
   att.rows.forEach(({key, rec, c}) => {
     const d = new Date(key + 'T00:00:00');
@@ -1197,6 +1226,11 @@ function renderAttendanceTable(w){
             `}
           </select>
         </td>
+        <td>
+          <input type="number" step="0.25" min="0" id="att-manualhours-${key}" class="att-manual-hours" data-key="${key}"
+            value="${rec.manualLateHours !== undefined && rec.manualLateHours !== '' ? rec.manualLateHours : ''}"
+            placeholder="تلقائي" title="اكتب هنا عدد ساعات الخصم بنفسك لو العامل شغال وردية مختلفة (مسائي/سهر) عشان البرنامج ميحسبش تأخير غلط" ${rec.holiday ? 'disabled' : ''}>
+        </td>
         <td id="att-status-${key}">${statusHtml}</td>
       </tr>`;
   });
@@ -1211,11 +1245,12 @@ function renderAttendanceTable(w){
       التوقيت الرسمي الحالي: ${settings.season === 'winter' ? 'شتوي — دخول 8ص، انصراف 5م' : 'صيفي — دخول 9ص، انصراف 6م'} (يوم الخميس 🕓 مختصر: انصراف ${settings.season === 'winter' ? '3م' : '4م'}) — سماحية تأخير 15 دقيقة.
       تقدر تغيّر التوقيت من لوحة "تسجيل سريع" في القائمة الجانبية.<br>
       عمود "الحالة اليدوية": لو مسجّلتش حضور/انصراف لعامل والبرنامج حطّه غياب غلط، اختار "حاضر (يدوي)" وهيتشال الغياب فوراً — وبالعكس لو عايز تحط غياب بإيدك اختار "غياب (يدوي)".<br>
-      🕌 يوم الجمعة "راحة أسبوعية" تلقائية (مش إجازة رسمية بأجر) — مش بتتحسب غياب ولا تأخير ومش بتضيف فلوس زيادة. لو العامل اشتغل فعلاً يوم جمعة، سجّل له حضور/انصراف عادي وكل وقت شغله هيتحسب "إضافي" بالكامل من غير أي حساب تأخير.
+      🕌 يوم الجمعة "راحة أسبوعية" تلقائية (مش إجازة رسمية بأجر) — مش بتتحسب غياب ولا تأخير ومش بتضيف فلوس زيادة. لو العامل اشتغل فعلاً يوم جمعة، سجّل له حضور/انصراف عادي وكل وقت شغله هيتحسب "إضافي" بالكامل من غير أي حساب تأخير.<br>
+      🌙 عمود "خصم يدوي (ساعة)": لو العامل شغال وردية مختلفة عن الرسمية (مثلاً مسائي أو سهر)، البرنامج ممكن يحسبله تأخير غلط لأنه بيقارن بالدوام الرسمي بس. اكتب هنا بنفسك عدد ساعات الخصم الصح (أو 0 لو مفيش خصم خالص)، وهيتجاهل الحساب التلقائي للتأخير/المغادرة المبكرة ليوم ده بس. سيب الخانة فاضية عشان يرجع للحساب التلقائي تاني.
     </div>
     <div class="att-table-wrap">
       <table class="att-table">
-        <thead><tr><th>اليوم</th><th>حضور</th><th>انصراف</th><th>الحالة اليدوية</th><th>النتيجة</th></tr></thead>
+        <thead><tr><th>اليوم</th><th>حضور</th><th>انصراف</th><th>الحالة اليدوية</th><th>خصم يدوي (ساعة)</th><th>النتيجة</th></tr></thead>
         <tbody>${rowsHtml}</tbody>
       </table>
     </div>
@@ -1400,6 +1435,16 @@ function renderForm(){
       refreshAttendanceRow(w, key);
     });
   });
+  container.querySelectorAll('.att-manual-hours').forEach(inp => {
+    inp.addEventListener('change', async (e) => {
+      const key = e.target.dataset.key;
+      if(!w.dailyLog) w.dailyLog = {};
+      if(!w.dailyLog[key]) w.dailyLog[key] = {};
+      w.dailyLog[key].manualLateHours = e.target.value;
+      await saveWorker(w);
+      refreshAttendanceRow(w, key);
+    });
+  });
   container.querySelectorAll('.att-manual').forEach(sel => {
     sel.addEventListener('change', async (e) => {
       const key = e.target.dataset.key;
@@ -1435,6 +1480,12 @@ function renderForm(){
         if(!w.dailyLog[key]) w.dailyLog[key] = {};
         const field = inp.classList.contains('att-in') ? 'in' : 'out';
         if(inp.value) w.dailyLog[key][field] = inp.value;
+      });
+      document.querySelectorAll('.att-manual-hours').forEach(inp => {
+        const key = inp.dataset.key;
+        if(!key) return;
+        if(!w.dailyLog[key]) w.dailyLog[key] = {};
+        w.dailyLog[key].manualLateHours = inp.value;
       });
       const att = computeMonthlyAttendance(w, 0);
       w.overtimeText = att.totalOTHours > 0 ? hoursToHM(att.totalOTHours) : '';

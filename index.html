@@ -916,20 +916,23 @@ function monthDayKeys(offset = 0){
 
 function computeMonthlyAttendance(w, offset = 0){
   const keys = monthDayKeys(offset);
-  let totalLateMin = 0, totalOTMin = 0, absentDays = 0;
+  let totalLateMin = 0, totalOTMin = 0, totalEarlyLeaveMin = 0, absentDays = 0;
   const rows = [];
   for(const key of keys){
     const rec = (w.dailyLog && w.dailyLog[key]) || {};
     const c = computeDay(key, rec);
     if(!c.holiday){
-      // مغادرة مبكرة بتتخصم بنفس منطق التأخير (ساعات ناقصة من الدوام الرسمي)
+      // مغادرة مبكرة بتتخصم بنفس منطق التأخير (ساعات ناقصة من الدوام الرسمي) —
+      // بنجمعها هنا في totalLateMin زي ما هي عشان حساب المرتب متغيرش، وبنجمعها
+      // كمان لوحدها في totalEarlyLeaveMin بس عشان تتعرض للعلم في ملخص الحضور.
       totalLateMin += c.lateMinutes + (c.earlyLeaveMinutes || 0);
+      totalEarlyLeaveMin += (c.earlyLeaveMinutes || 0);
       totalOTMin += c.overtimeMinutes;
       if(c.isAbsent) absentDays++;
     }
     rows.push({ key, rec, c });
   }
-  return { rows, totalLateHours: minutesToHours(totalLateMin), totalOTHours: minutesToHours(totalOTMin), absentDays };
+  return { rows, totalLateHours: minutesToHours(totalLateMin), totalOTHours: minutesToHours(totalOTMin), totalEarlyLeaveHours: minutesToHours(totalEarlyLeaveMin), absentDays };
 }
 
 async function saveWorkerList(){
@@ -1182,9 +1185,11 @@ function refreshAttendanceRow(w, key){
 
   const att = computeMonthlyAttendance(w, attMonthOffset);
   const lateEl = document.getElementById('attSummaryLate');
+  const earlyEl = document.getElementById('attSummaryEarly');
   const otEl = document.getElementById('attSummaryOT');
   const absEl = document.getElementById('attSummaryAbsent');
   if(lateEl) lateEl.textContent = fmt(att.totalLateHours) + ' ساعة';
+  if(earlyEl) earlyEl.textContent = fmt(att.totalEarlyLeaveHours) + ' ساعة';
   if(otEl) otEl.textContent = fmt(att.totalOTHours) + ' ساعة';
   if(absEl) absEl.textContent = att.absentDays + ' يوم';
 }
@@ -1256,6 +1261,7 @@ function renderAttendanceTable(w){
     </div>
     <div class="att-summary">
       <span>إجمالي التأخير: <b id="attSummaryLate">${fmt(att.totalLateHours)} ساعة</b></span>
+      <span style="color:var(--muted);">(منها مغادرة مبكرة: <b id="attSummaryEarly">${fmt(att.totalEarlyLeaveHours)} ساعة</b> — للعلم بس، مش خصم إضافي)</span>
       <span>إجمالي الإضافي: <b id="attSummaryOT">${fmt(att.totalOTHours)} ساعة</b></span>
       <span>أيام الغياب: <b id="attSummaryAbsent">${att.absentDays} يوم</b></span>
     </div>

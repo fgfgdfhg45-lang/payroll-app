@@ -1261,9 +1261,9 @@ function renderAttendanceTable(w){
     </div>
     <div class="att-summary">
       <span>إجمالي التأخير: <b id="attSummaryLate">${fmt(att.totalLateHours)} ساعة</b></span>
-      <span style="color:var(--muted);">(منها مغادرة مبكرة: <b id="attSummaryEarly">${fmt(att.totalEarlyLeaveHours)} ساعة</b> — للعلم بس، مش خصم إضافي)</span>
       <span>إجمالي الإضافي: <b id="attSummaryOT">${fmt(att.totalOTHours)} ساعة</b></span>
       <span>أيام الغياب: <b id="attSummaryAbsent">${att.absentDays} يوم</b></span>
+      <span>منها مغادرة مبكرة: <b id="attSummaryEarly">${fmt(att.totalEarlyLeaveHours)} ساعة</b></span>
     </div>
     <button type="button" class="att-apply-btn" id="attApplyBtn" ${attMonthOffset !== 0 ? 'disabled' : ''}>
       ${attMonthOffset !== 0 ? '📥 التطبيق متاح للشهر الحالي بس (ارجع "الشهر الحالي" الأول)' : '📥 تطبيق هذه الأرقام على حساب المرتب (يستبدل خانات التأخير/الإضافي/الغياب اليدوية)'}

@@ -297,7 +297,7 @@
     direction:ltr;
     text-align:left;
   }
-  #f_salary, #f_advance, #f_absent, #f_discount, #f_overtime, #f_late, #f_carryPrev, #f_carryNew, #f_carryDeduct, #f_holiday, #f_joinDay{
+  #f_salary, #f_advanceAmount, #f_advanceDate, #f_absent, #f_discount, #f_overtime, #f_late, #f_carryPrev, #f_carryNew, #f_carryDeduct, #f_holiday, #f_joinDay{
     direction:ltr;
     text-align:left;
   }
@@ -493,6 +493,47 @@
     margin-bottom:18px;
   }
 
+  .carry-report-screen{padding:0;}
+  .carry-report-page{
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:26px 28px;
+    max-width:900px;
+    margin:0 auto;
+  }
+  .carry-report-page h2{
+    color:var(--navy);font-size:19px;margin-bottom:2px;
+  }
+  .carry-report-page .cr-sub{color:var(--muted);font-size:12.5px;margin-bottom:18px;}
+  table.carry-table{width:100%;border-collapse:collapse;font-size:13px;}
+  table.carry-table th{
+    background:var(--navy);color:#fff;padding:9px 8px;text-align:center;font-size:12.5px;
+  }
+  table.carry-table td{padding:8px 8px;border-bottom:1px solid var(--line);text-align:center;}
+  table.carry-table td:first-child{text-align:right;font-weight:bold;color:var(--navy);}
+  table.carry-table tr:nth-child(even){background:#f8f9fc;}
+  table.carry-table tfoot td{
+    font-weight:bold;background:#f0f1f8;color:var(--navy);font-size:13.5px;border-top:2px solid var(--navy);
+  }
+  .carry-report-page .cr-footnote{
+    margin-top:16px;font-size:11.5px;color:var(--muted);
+  }
+  .carry-report-page .cr-empty{padding:24px;text-align:center;color:var(--muted);}
+
+  .advance-log-list{margin-top:10px;display:flex;flex-direction:column;gap:6px;}
+  .advance-entry{
+    display:flex;align-items:center;justify-content:space-between;gap:8px;
+    background:#f6f7fb;border-radius:8px;padding:7px 10px;font-size:12.5px;
+  }
+  .advance-entry .ae-date{color:var(--muted);direction:ltr;}
+  .advance-entry .ae-amount{font-weight:bold;color:var(--navy);}
+  .advance-entry .ae-del{
+    background:none;border:none;color:var(--warn);cursor:pointer;font-size:11.5px;
+    padding:3px 6px;border-radius:6px;
+  }
+  .advance-entry .ae-del:hover{background:rgba(192,57,43,0.1);}
+
   @media print{
     *{
       -webkit-print-color-adjust:exact !important;
@@ -507,6 +548,11 @@
       box-shadow:none;
       border:none;
       page-break-after:always;
+      margin:0 auto;
+    }
+    .carry-report-page{
+      box-shadow:none;
+      border:none;
       margin:0 auto;
     }
   }
@@ -587,6 +633,7 @@
   <div class="topbtns">
     <button class="secondary" id="backBtn" style="display:none;">⟵ رجوع للعمال</button>
     <button class="secondary" id="archiveBtn">📁 الأرشيف</button>
+    <button class="secondary" id="carryReportBtn">📋 كشف الترحيلات</button>
     <button class="secondary" id="rolloverBtn">ترحيل الأرصدة للشهر الجديد</button>
     <button id="updateBtn">تحديث القبض</button>
     <button class="logout-btn" id="logoutBtn" title="تسجيل الخروج">⏻ خروج</button>
@@ -635,6 +682,14 @@
         <div id="archiveDetailContainer"></div>
       </div>
     </div>
+
+    <div class="carry-report-screen" id="carryReportScreen" style="display:none;">
+      <div class="cards-toolbar">
+        <button class="ghost" id="closeCarryReportBtn">⟵ رجوع</button>
+        <button onclick="window.print()">🖨️ طباعة / حفظ PDF</button>
+      </div>
+      <div id="carryReportContainer"></div>
+    </div>
   </main>
 </div>
 </div><!-- /#appRoot -->
@@ -655,6 +710,7 @@ function blankWorker(){
     overtimeText: '',
     lateText: '',
     advance: 0,
+    advanceLog: [],
     absentDays: 0,
     discount: 0,
     discountReason: '',
@@ -746,6 +802,15 @@ async function loadAll(){
         if(wraw){
           const w = JSON.parse(wraw);
           if(!w.dailyLog) w.dailyLog = {};
+          if(!Array.isArray(w.advanceLog)){
+            // ترحيل أي رصيد سلف قديم كان متسجل كرقم واحد بس (النظام القديم) إلى سطر
+            // واحد في سجل السلف الجديد، عشان معلومة السلف القديمة متضاعش.
+            w.advanceLog = [];
+            const legacyAdvance = parseFloat(w.advance) || 0;
+            if(legacyAdvance > 0){
+              w.advanceLog.push({ id: 'adv_' + Date.now() + '_legacy', date: todayKey(), amount: legacyAdvance, note: 'رصيد سلف سابق (مرحّل تلقائي من النظام القديم)' });
+            }
+          }
           workers.push(w);
         }
       }catch(e){}
@@ -792,6 +857,12 @@ function pad2(n){ return String(n).padStart(2,'0'); }
 function todayKey(){
   const d = new Date();
   return d.getFullYear() + '-' + pad2(d.getMonth()+1) + '-' + pad2(d.getDate());
+}
+function fmtDateShort(iso){
+  if(!iso) return '';
+  const parts = iso.split('-');
+  if(parts.length !== 3) return iso;
+  return parts[2] + '/' + parts[1] + '/' + parts[0];
 }
 function nowHM(){
   const d = new Date();
@@ -977,7 +1048,8 @@ function computeWorker(w){
   const lateHours = parseTimeSum(w.lateText);
   const lateAmount = lateHours * hourRate;
 
-  const advance = parseFloat(w.advance) || 0;
+  const advanceLog = Array.isArray(w.advanceLog) ? w.advanceLog : [];
+  const advance = advanceLog.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
 
   const absentDays = parseFloat(w.absentDays) || 0;
   const countedAbsentDays = Math.max(0, absentDays - 1);
@@ -1001,7 +1073,7 @@ function computeWorker(w){
   const total = baseSalary + overtimeAmount + holidayAmount - lateAmount - advance - absentAmount - discount - carryDeduct;
 
   return { salary, dayRate, hourRate, overtimeHours, overtimeAmount, lateHours, lateAmount,
-           advance, absentDays, countedAbsentDays, absentAmount, discount,
+           advance, advanceLog, absentDays, countedAbsentDays, absentAmount, discount,
            holidayDays, holidayAmount, joinDay, workedDays, baseSalary,
            carryPrev, carryNew, carryDeduct, carryBalance, carryRemaining, total };
 }
@@ -1326,13 +1398,32 @@ function renderForm(){
       <div class="result-line minus"><span>قيمة التأخير المخصومة</span><b>-${fmt(r.lateAmount)} ج</b></div>
     </div>
 
-    <div class="row">
-      <div class="card">
-        <h2><span class="dot"></span>السلف</h2>
-        <label>إجمالي السلف خلال الشهر (جنيه)</label>
-        <input type="text" inputmode="decimal" id="f_advance" value="${w.advance}" dir="ltr">
-        <div class="result-line minus" style="margin-top:10px;"><span>يُخصم</span><b>-${fmt(r.advance)} ج</b></div>
+    <div class="card">
+      <h2><span class="dot"></span>السلف</h2>
+      <div class="row">
+        <div>
+          <label>مبلغ سلفة جديدة (جنيه)</label>
+          <input type="text" inputmode="decimal" id="f_advanceAmount" placeholder="مثلاً 200" dir="ltr">
+        </div>
+        <div>
+          <label>تاريخ السلفة</label>
+          <input type="date" id="f_advanceDate" value="${todayKey()}" dir="ltr">
+        </div>
       </div>
+      <button class="secondary" id="addAdvanceBtn" style="margin-top:8px;">+ تسجيل السلفة</button>
+      <div class="advance-log-list" id="advanceLogList">
+        ${r.advanceLog.length === 0
+          ? '<div class="hint" style="margin-top:10px;">مفيش سلف مسجلة لسه هذا الشهر</div>'
+          : r.advanceLog.slice().sort((a,b) => (a.date || '').localeCompare(b.date || '')).map(e => `
+            <div class="advance-entry">
+              <span class="ae-date">${escapeHtml(fmtDateShort(e.date))}</span>
+              <span class="ae-amount">${fmt(parseFloat(e.amount) || 0)} ج</span>
+              <button type="button" class="ae-del" data-id="${e.id}" title="حذف السلفة دي نهائيًا">🗑 حذف</button>
+            </div>`).join('')}
+      </div>
+      <div class="hint" style="margin-top:8px;">السلف بتفضل مسجلة زي ما هي ومتتمسحش لوحدها أبدًا (حتى مع تحديث القبض أو الترحيل) — إنت بس اللي تقدر تمسحها بإيدك من زرار "حذف" جنب كل سلفة.</div>
+      <div class="result-line minus" style="margin-top:10px;"><span>إجمالي السلف يُخصم</span><b>-${fmt(r.advance)} ج</b></div>
+    </div>
 
       <div class="card">
         <h2><span class="dot"></span>الغياب</h2>
@@ -1341,7 +1432,6 @@ function renderForm(){
         <div class="hint">أول يوم غياب لا يُحتسب — الأيام المحسوبة: ${r.countedAbsentDays} يوم</div>
         <div class="result-line minus" style="margin-top:10px;"><span>يُخصم</span><b>-${fmt(r.absentAmount)} ج</b></div>
       </div>
-    </div>
 
     <div class="card">
       <h2><span class="dot"></span>أيام إجازة رسمية اشتغلها العامل</h2>
@@ -1414,7 +1504,6 @@ function renderForm(){
   bindNumeric('#f_joinDay', 'joinDay');
   bind('#f_overtime', 'overtimeText');
   bind('#f_late', 'lateText');
-  bindNumeric('#f_advance', 'advance');
   bindNumeric('#f_absent', 'absentDays');
   bindNumeric('#f_holiday', 'holidayDays');
   bindNumeric('#f_carryPrev', 'carryPrev');
@@ -1428,6 +1517,35 @@ function renderForm(){
       await saveWorker(w);
     });
   }
+
+  const addAdvanceBtn = $('#addAdvanceBtn');
+  if(addAdvanceBtn){
+    addAdvanceBtn.addEventListener('click', async () => {
+      const amountEl = $('#f_advanceAmount');
+      const dateEl = $('#f_advanceDate');
+      const amount = parseFloat(amountEl.value);
+      if(!amount || amount <= 0){
+        alert('اكتب قيمة سلفة صحيحة أكبر من صفر');
+        return;
+      }
+      const date = dateEl.value || todayKey();
+      if(!Array.isArray(w.advanceLog)) w.advanceLog = [];
+      w.advanceLog.push({ id: 'adv_' + Date.now() + '_' + Math.floor(Math.random()*9999), date, amount });
+      await saveWorker(w);
+      renderSidebar();
+      renderForm();
+    });
+  }
+  container.querySelectorAll('.ae-del').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const id = e.target.closest('.ae-del').dataset.id;
+      if(!confirm('متأكد إنك عايز تمسح السلفة دي نهائيًا؟ الحذف ده يدوي بس وميرجعش تاني.')) return;
+      w.advanceLog = (w.advanceLog || []).filter(x => x.id !== id);
+      await saveWorker(w);
+      renderSidebar();
+      renderForm();
+    });
+  });
 
   container.querySelectorAll('.att-in, .att-out').forEach(inp => {
     inp.addEventListener('change', async (e) => {
@@ -1528,13 +1646,14 @@ function updateComputedOnly(w){
   }
 }
 
-let currentScreen = 'form'; // 'form' | 'cards' | 'archive'
+let currentScreen = 'form'; // 'form' | 'cards' | 'archive' | 'carryReport'
 
 function renderAll(){
   renderSidebar();
   $('#formScreen').style.display = 'none';
   $('#cardsScreen').style.display = 'none';
   $('#archiveScreen').style.display = 'none';
+  $('#carryReportScreen').style.display = 'none';
   $('#backBtn').style.display = 'none';
 
   if(currentScreen === 'cards'){
@@ -1543,10 +1662,76 @@ function renderAll(){
   } else if(currentScreen === 'archive'){
     $('#archiveScreen').style.display = 'block';
     $('#backBtn').style.display = 'inline-block';
+  } else if(currentScreen === 'carryReport'){
+    $('#carryReportScreen').style.display = 'block';
+    $('#backBtn').style.display = 'inline-block';
+    renderCarryReport();
   } else {
     $('#formScreen').style.display = 'block';
     renderForm();
   }
+}
+
+function renderCarryReport(){
+  const container = $('#carryReportContainer');
+  // بنجيب بس العمال اللي عندهم أي مبلغ مرتبط بالترحيل (سابق أو جديد أو متبقي)
+  // عشان القايمة متبقاش فيها عمال مالهمش علاقة بالموضوع.
+  const rows = workers
+    .map(w => ({ w, r: computeWorker(w) }))
+    .filter(({ r }) => (r.carryPrev > 0 || r.carryNew > 0 || r.carryDeduct > 0 || r.carryRemaining > 0));
+
+  if(rows.length === 0){
+    container.innerHTML = `
+      <div class="carry-report-page">
+        <h2>كشف الترحيلات (مبالغ مؤجلة على العمال)</h2>
+        <div class="cr-sub">${escapeHtml($('#monthLabel').textContent || '')} — تاريخ الطباعة: ${new Date().toLocaleDateString('ar-EG')}</div>
+        <div class="cr-empty">مفيش أي عامل عليه ترحيل مسجل حاليًا.</div>
+      </div>`;
+    return;
+  }
+
+  let totalPrev = 0, totalNew = 0, totalDeduct = 0, totalRemaining = 0;
+  const rowsHtml = rows.map(({ w, r }) => {
+    totalPrev += r.carryPrev;
+    totalNew += r.carryNew;
+    totalDeduct += r.carryDeduct;
+    totalRemaining += r.carryRemaining;
+    return `<tr>
+      <td>${escapeHtml(w.name || 'بدون اسم')}</td>
+      <td>${fmt(r.carryPrev)} ج</td>
+      <td>${fmt(r.carryNew)} ج</td>
+      <td>${fmt(r.carryDeduct)} ج</td>
+      <td>${fmt(r.carryRemaining)} ج</td>
+    </tr>`;
+  }).join('');
+
+  container.innerHTML = `
+    <div class="carry-report-page">
+      <h2>كشف الترحيلات (مبالغ مؤجلة على العمال)</h2>
+      <div class="cr-sub">${escapeHtml($('#monthLabel').textContent || '')} — تاريخ الطباعة: ${new Date().toLocaleDateString('ar-EG')}</div>
+      <table class="carry-table">
+        <thead>
+          <tr>
+            <th>اسم العامل</th>
+            <th>رصيد مرحّل من قبل</th>
+            <th>مبلغ جديد هذا الشهر</th>
+            <th>المخصوم هذا الشهر</th>
+            <th>المتبقي مرحّل للشهر القادم</th>
+          </tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+        <tfoot>
+          <tr>
+            <td>الإجمالي</td>
+            <td>${fmt(totalPrev)} ج</td>
+            <td>${fmt(totalNew)} ج</td>
+            <td>${fmt(totalDeduct)} ج</td>
+            <td>${fmt(totalRemaining)} ج</td>
+          </tr>
+        </tfoot>
+      </table>
+      <div class="cr-footnote">هذا الكشف موثّق برصيد كل عامل كما هو مسجل في البرنامج وقت الطباعة.</div>
+    </div>`;
 }
 
 function buildCardsInto(container, list, monthText){
@@ -1712,7 +1897,7 @@ $('#addWorkerBtn').addEventListener('click', async () => {
 });
 
 $('#rolloverBtn').addEventListener('click', async () => {
-  if(!confirm('هل تريد ترحيل الأرصدة المتبقية لكل العمال للشهر الجديد؟ سيتم تصفير الإضافي والتأخير والسلف والغياب والخصومات، وترحيل أي رصيد متبقي فقط.')) return;
+  if(!confirm('هل تريد ترحيل الأرصدة المتبقية لكل العمال للشهر الجديد؟ سيتم تصفير الإضافي والتأخير والغياب والخصومات، وترحيل أي رصيد متبقي فقط. (السلف مش بتتصفر أبدًا هنا — بتفضل زي ما هي لحد ما تمسحها بإيدك)')) return;
   for(const w of workers){
     const r = computeWorker(w);
     w.carryPrev = r.carryRemaining;
@@ -1720,7 +1905,6 @@ $('#rolloverBtn').addEventListener('click', async () => {
     w.carryDeduct = 0;
     w.overtimeText = '';
     w.lateText = '';
-    w.advance = 0;
     w.absentDays = 0;
     w.discount = 0;
     w.discountReason = '';
@@ -1729,7 +1913,7 @@ $('#rolloverBtn').addEventListener('click', async () => {
     await saveWorker(w);
   }
   renderAll();
-  alert('تم ترحيل الأرصدة بنجاح، وتصفير بيانات الشهر السابق.');
+  alert('تم ترحيل الأرصدة بنجاح، وتصفير بيانات الشهر السابق. (السلف باقية زي ما هي)');
 });
 
 $('#updateBtn').addEventListener('click', async () => {
@@ -1762,6 +1946,15 @@ $('#closeArchiveBtn').addEventListener('click', () => {
 $('#backToArchiveListBtn').addEventListener('click', () => {
   $('#archiveListView').style.display = 'block';
   $('#archiveDetailView').style.display = 'none';
+});
+
+$('#carryReportBtn').addEventListener('click', () => {
+  currentScreen = 'carryReport';
+  renderAll();
+});
+$('#closeCarryReportBtn').addEventListener('click', () => {
+  currentScreen = 'form';
+  renderAll();
 });
 
 let totalHidden = false;

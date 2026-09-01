@@ -1337,9 +1337,10 @@ function renderAttendanceTable(w){
       <span>أيام الغياب: <b id="attSummaryAbsent">${att.absentDays} يوم</b></span>
       <span>منها مغادرة مبكرة: <b id="attSummaryEarly">${fmt(att.totalEarlyLeaveHours)} ساعة</b></span>
     </div>
-    <button type="button" class="att-apply-btn" id="attApplyBtn" ${attMonthOffset !== 0 ? 'disabled' : ''}>
-      ${attMonthOffset !== 0 ? '📥 التطبيق متاح للشهر الحالي بس (ارجع "الشهر الحالي" الأول)' : '📥 تطبيق هذه الأرقام على حساب المرتب (يستبدل خانات التأخير/الإضافي/الغياب اليدوية)'}
+    <button type="button" class="att-apply-btn" id="attApplyBtn">
+      📥 تطبيق أرقام ${monthTitle} على حساب المرتب (يستبدل خانات التأخير/الإضافي/الغياب اليدوية)
     </button>
+    ${attMonthOffset !== 0 ? '<div class="hint" style="margin-top:8px;">⚠️ إنت واقف على شهر غير الشهر الحالي — التطبيق هيحسب أرقام هذا الشهر (' + monthTitle + ') ويحطها في خانات التأخير/الإضافي/الغياب بتاعة العامل. لو محتاج تطبّق الشهر الحالي، ارجع له من "الشهر التالي ›" الأول.</div>' : ''}
   `;
 }
 
@@ -1593,7 +1594,7 @@ function renderForm(){
     });
   });
   const attApplyBtn = $('#attApplyBtn');
-  if(attApplyBtn && attMonthOffset === 0){
+  if(attApplyBtn){
     attApplyBtn.onclick = async () => {
       // نتأكد الأول إن كل خانات الوقت الظاهرة فعليًا محفوظة في dailyLog
       // (شبكة أمان لو خانة ما اتسجلتش بسبب عدم وجود change/blur).
@@ -1611,7 +1612,13 @@ function renderForm(){
         if(!w.dailyLog[key]) w.dailyLog[key] = {};
         w.dailyLog[key].manualLateHours = inp.value;
       });
-      const att = computeMonthlyAttendance(w, 0);
+      // بيطبّق أرقام الشهر اللي إنت واقف بتتفرج عليه دلوقتي (attMonthOffset)،
+      // مش الشهر الحالي بالضرورة — عشان تقدر تطلع قبض شهر فات لو نسيته.
+      const targetOffset = attMonthOffset;
+      const targetBase = targetMonthBase(targetOffset);
+      const targetLabel = MONTH_NAMES[targetBase.getMonth()] + ' ' + targetBase.getFullYear();
+      if(!confirm('هيتم تطبيق أرقام شهر ' + targetLabel + ' على خانات التأخير/الإضافي/الغياب لهذا العامل. متأكد؟')) return;
+      const att = computeMonthlyAttendance(w, targetOffset);
       w.overtimeText = att.totalOTHours > 0 ? hoursToHM(att.totalOTHours) : '';
       w.lateText = att.totalLateHours > 0 ? hoursToHM(att.totalLateHours) : '';
       w.absentDays = att.absentDays;

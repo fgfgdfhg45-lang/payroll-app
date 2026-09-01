@@ -1043,10 +1043,10 @@ function computeWorker(w){
   const hourRate = dayRate / 10;
 
   const overtimeHours = parseTimeSum(w.overtimeText);
-  const overtimeAmount = overtimeHours * hourRate * 1.5;
+  const overtimeAmount = overtimeHours * hourRate * 2;
 
   const lateHours = parseTimeSum(w.lateText);
-  const lateAmount = lateHours * hourRate;
+  const lateAmount = lateHours * hourRate * 1;
 
   const advanceLog = Array.isArray(w.advanceLog) ? w.advanceLog : [];
   const advance = advanceLog.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
@@ -1387,7 +1387,7 @@ function renderForm(){
       <h2><span class="dot"></span>الساعات الإضافية</h2>
       <label>اكتب الساعات مفصولة بـ +: إما بصيغة ساعة:دقيقة مثل 0:30+1:30 أو رقم عشري مثل 8.8</label>
       <input type="text" id="f_overtime" value="${escapeHtml(w.overtimeText)}" placeholder="0:30+1:30+0:50" dir="ltr">
-      <div class="hint">الإجمالي: ${hoursToLabel(r.overtimeHours)} (${fmt(r.overtimeHours)} ساعة) × ${fmt(r.hourRate)} × 1.5</div>
+      <div class="hint">الإجمالي: ${hoursToLabel(r.overtimeHours)} (${fmt(r.overtimeHours)} ساعة) × ${fmt(r.hourRate)} × 2</div>
       <div class="result-line plus"><span>قيمة الإضافي المضافة للمرتب</span><b>+${fmt(r.overtimeAmount)} ج</b></div>
     </div>
 

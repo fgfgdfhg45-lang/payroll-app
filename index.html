@@ -701,6 +701,7 @@
           <button class="ghost" id="backToArchiveListBtn">⟵ كل الشهور</button>
           <div>
             <button class="ghost" id="toggleTotalBtn2">🙈 إخفاء الإجمالي</button>
+            <button class="ghost" id="toggleArchiveViewBtn">📋 كشف الترحيلات</button>
             <button onclick="window.print()">🖨️ طباعة هذا الكشف</button>
           </div>
         </div>
@@ -1679,6 +1680,8 @@ function updateComputedOnly(w){
 }
 
 let currentScreen = 'form'; // 'form' | 'cards' | 'archive' | 'carryReport'
+let currentArchiveData = null; // نسخة الأرشيف المفتوحة حالياً (لو موجودة)
+let archiveDetailMode = 'cards'; // 'cards' | 'carry' — شكل عرض الأرشيف المفتوح
 
 function renderAll(){
   renderSidebar();
@@ -2013,11 +2016,94 @@ async function openArchive(key){
   const raw = await storeGet('archive:' + key);
   if(!raw){ alert('تعذر فتح هذا الكشف.'); return; }
   const data = JSON.parse(raw);
+  currentArchiveData = data;
+  archiveDetailMode = 'cards';
   $('#archiveListView').style.display = 'none';
   $('#archiveDetailView').style.display = 'block';
+  $('#toggleArchiveViewBtn').textContent = '📋 كشف الترحيلات';
   buildCardsInto($('#archiveDetailContainer'), data.workers, data.label);
   applyTotalVisibility();
 }
+
+// بيبني جدول كشف ترحيلات للقراءة بس (مش قابل للتعديل) من نسخة أرشيف قديمة،
+// عشان تقدر ترجع لأي شهر فات وتشوف كان عليك كام واتخصم كام بالظبط وقتها.
+function renderArchiveCarryTable(data){
+  const container = $('#archiveDetailContainer');
+  const rows = (data.workers || []).filter(w => {
+    const c = w.computed || {};
+    return (c.carryPrev > 0 || c.carryNew > 0 || c.carryDeduct > 0 || c.carryRemaining > 0);
+  });
+
+  if(rows.length === 0){
+    container.innerHTML = `
+      <div class="carry-report-page">
+        <h2>كشف الترحيلات — ${escapeHtml(data.label)}</h2>
+        <div class="cr-empty">مفيش أي ترحيلات مسجلة في نسخة الأرشيف دي.</div>
+      </div>`;
+    return;
+  }
+
+  let totalPrev = 0, totalBalance = 0, totalDeduct = 0, totalRemaining = 0;
+  const rowsHtml = rows.map(w => {
+    const c = w.computed || {};
+    totalPrev += (c.carryPrev || 0);
+    totalBalance += (c.carryBalance || 0);
+    totalDeduct += (c.carryDeduct || 0);
+    totalRemaining += (c.carryRemaining || 0);
+    return `<tr>
+      <td>${escapeHtml(w.name || 'بدون اسم')}</td>
+      <td>${fmt(c.carryPrev || 0)} ج</td>
+      <td>${fmt(c.carryNew || 0)} ج</td>
+      <td>${fmt(c.carryBalance || 0)} ج</td>
+      <td>${fmt(c.carryDeduct || 0)} ج</td>
+      <td>${fmt(c.carryRemaining || 0)} ج</td>
+    </tr>`;
+  }).join('');
+
+  container.innerHTML = `
+    <div class="carry-report-page">
+      <h2>كشف الترحيلات — ${escapeHtml(data.label)}</h2>
+      <div class="cr-sub">نسخة محفوظة في الأرشيف — للقراءة فقط، متتعدلش من هنا.</div>
+      <table class="carry-table">
+        <thead>
+          <tr>
+            <th>اسم العامل</th>
+            <th>رصيد مرحّل من قبل</th>
+            <th>مبلغ جديد هذا الشهر</th>
+            <th>الإجمالي (قديم + جديد)</th>
+            <th>المخصوم هذا الشهر</th>
+            <th>المتبقي مرحّل للشهر القادم</th>
+          </tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+        <tfoot>
+          <tr>
+            <td>الإجمالي</td>
+            <td>${fmt(totalPrev)} ج</td>
+            <td></td>
+            <td>${fmt(totalBalance)} ج</td>
+            <td>${fmt(totalDeduct)} ج</td>
+            <td>${fmt(totalRemaining)} ج</td>
+          </tr>
+        </tfoot>
+      </table>
+      <div class="cr-footnote">هذا الكشف جزء من نسخة أرشيف "${escapeHtml(data.label)}" المحفوظة، وبيعكس أرقام الترحيل وقت حفظ هذا الأرشيف بالتحديد.</div>
+    </div>`;
+}
+
+$('#toggleArchiveViewBtn').addEventListener('click', () => {
+  if(!currentArchiveData) return;
+  if(archiveDetailMode === 'cards'){
+    archiveDetailMode = 'carry';
+    $('#toggleArchiveViewBtn').textContent = '🗂️ عرض الكروت';
+    renderArchiveCarryTable(currentArchiveData);
+  } else {
+    archiveDetailMode = 'cards';
+    $('#toggleArchiveViewBtn').textContent = '📋 كشف الترحيلات';
+    buildCardsInto($('#archiveDetailContainer'), currentArchiveData.workers, currentArchiveData.label);
+    applyTotalVisibility();
+  }
+});
 
 $('#addWorkerBtn').addEventListener('click', async () => {
   const w = blankWorker();
@@ -2031,6 +2117,9 @@ $('#addWorkerBtn').addEventListener('click', async () => {
 
 $('#rolloverBtn').addEventListener('click', async () => {
   if(!confirm('هل تريد ترحيل الأرصدة المتبقية لكل العمال للشهر الجديد؟ سيتم تصفير الإضافي والتأخير والغياب والخصومات، وترحيل أي رصيد متبقي فقط. (السلف مش بتتصفر أبدًا هنا — بتفضل زي ما هي لحد ما تمسحها بإيدك)')) return;
+  // بنحفظ نسخة أرشيف كاملة من بيانات الشهر ده (فيها كل أرقام الترحيل الحالية)
+  // قبل ما نصفّر أي حاجة، عشان الأرقام القديمة متتمسحش خالص وتفضل موجودة في الأرشيف.
+  await saveArchiveForCurrentMonth();
   for(const w of workers){
     const r = computeWorker(w);
     w.carryPrev = r.carryRemaining;
@@ -2046,7 +2135,7 @@ $('#rolloverBtn').addEventListener('click', async () => {
     await saveWorker(w);
   }
   renderAll();
-  alert('تم ترحيل الأرصدة بنجاح، وتصفير بيانات الشهر السابق. (السلف باقية زي ما هي)');
+  alert('تم حفظ أرشيف الشهر الحالي، وترحيل الأرصدة بنجاح، وتصفير بيانات الشهر السابق. (السلف باقية زي ما هي)');
 });
 
 $('#updateBtn').addEventListener('click', async () => {

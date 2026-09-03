@@ -530,6 +530,17 @@
   }
   table.carry-table input.cr-input:focus{outline:none;border-color:var(--orange);background:#fff;}
   table.carry-table td.cr-readonly{color:var(--navy);}
+  table.carry-table td.cr-empty-row{padding:18px;text-align:center;color:var(--muted);}
+  table.carry-table .cr-del-row{
+    border:none;background:#fdecea;color:#c0392b;width:24px;height:24px;border-radius:50%;
+    cursor:pointer;font-size:13px;line-height:1;
+  }
+  table.carry-table .cr-del-row:hover{background:#f6c5c0;}
+  .carry-report-page .cr-add-row{margin-bottom:14px;}
+  .carry-report-page .cr-add-row select{
+    padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-family:inherit;
+    font-size:13px;background:#fff;min-width:220px;
+  }
 
   .advance-log-list{margin-top:10px;display:flex;flex-direction:column;gap:6px;}
   .advance-entry{
@@ -1693,8 +1704,34 @@ function renderAll(){
   }
 }
 
-// بنعرض كل العمال هنا (مش بس اللي عليهم ترحيل حالي) عشان تقدر تضيف
-// مبلغ ترحيل جديد لأي عامل مباشرة من الشاشة دي حتى لو مكانش عليه حاجة قبل كده.
+// بنحدد هل العامل ده "مضاف" لكشف الترحيلات ولا لأ:
+// - لو اتحذف يدوي قبل كده (carryListed === false) يفضل مخفي حتى لو له رصيد.
+// - لو اتضاف يدوي (carryListed === true) يفضل ظاهر حتى لو كل أرقامه صفر.
+// - لو معملش معاه حاجة أصلاً، بيبان بس لو عنده أي رصيد ترحيل حقيقي (سلوك تلقائي زي الأول).
+function isCarryListed(w){
+  if(w.carryListed === true) return true;
+  if(w.carryListed === false) return false;
+  const r = computeWorker(w);
+  return (r.carryPrev > 0 || r.carryNew > 0 || r.carryDeduct > 0 || r.carryRemaining > 0);
+}
+
+async function addWorkerToCarryReport(id){
+  const w = workers.find(x => x.id === id);
+  if(!w) return;
+  w.carryListed = true;
+  await saveWorker(w);
+  renderCarryReport();
+}
+
+async function removeWorkerFromCarryReport(id){
+  const w = workers.find(x => x.id === id);
+  if(!w) return;
+  if(!confirm(`تشيل "${w.name || 'العامل'}" من كشف الترحيلات؟\n(بياناته مش هتتمسح، وتقدر تضيفه تاني في أي وقت من القايمة فوق)`)) return;
+  w.carryListed = false;
+  await saveWorker(w);
+  renderCarryReport();
+}
+
 function renderCarryReport(){
   const container = $('#carryReportContainer');
 
@@ -1708,9 +1745,16 @@ function renderCarryReport(){
     return;
   }
 
-  const rowsHtml = workers.map(w => {
+  const listed = workers.filter(isCarryListed);
+  const notListed = workers.filter(w => !isCarryListed(w));
+
+  const optionsHtml = notListed
+    .map(w => `<option value="${w.id}">${escapeHtml(w.name || 'بدون اسم')}</option>`).join('');
+
+  const rowsHtml = listed.map(w => {
     const r = computeWorker(w);
     return `<tr data-worker-id="${w.id}">
+      <td class="no-print"><button type="button" class="cr-del-row" title="حذف من الكشف">✕</button></td>
       <td>${escapeHtml(w.name || 'بدون اسم')}</td>
       <td class="cr-readonly" data-cell="prev">${fmt(r.carryPrev)} ج</td>
       <td><input type="text" inputmode="decimal" class="cr-input" dir="ltr" data-field="carryNew" value="${w.carryNew !== undefined ? w.carryNew : 0}" placeholder="0"></td>
@@ -1720,14 +1764,23 @@ function renderCarryReport(){
     </tr>`;
   }).join('');
 
+  const emptyRowHtml = `<tr><td colspan="7" class="cr-empty-row">مفيش حد في الكشف ده دلوقتي. ضيف عامل من القايمة فوق.</td></tr>`;
+
   container.innerHTML = `
     <div class="carry-report-page">
       <h2>كشف الترحيلات (مبالغ مؤجلة على العمال)</h2>
       <div class="cr-sub">${escapeHtml($('#monthLabel').textContent || '')} — تاريخ الطباعة: ${new Date().toLocaleDateString('ar-EG')}</div>
-      <div class="cr-hint no-print">تقدر تكتب هنا مباشرة "مبلغ جديد هذا الشهر" أو "المخصوم" لأي عامل، والإجمالي والمتبقي هيتحدّثوا تلقائي ويتحفظوا لوحدهم.</div>
+      <div class="cr-hint no-print">تقدر تحذف أي عامل معندوش ترحيلات من الكشف بزرار ✕، وتضيف أي حد تاني من القايمة تحت. اللي تكتبه في "مبلغ جديد" أو "المخصوم" بيتحفظ لوحده.</div>
+      <div class="cr-add-row no-print">
+        <select id="carryAddSelect">
+          <option value="">${notListed.length ? '➕ اختار عامل تضيفه للكشف...' : 'كل العمال مضافين بالفعل'}</option>
+          ${optionsHtml}
+        </select>
+      </div>
       <table class="carry-table">
         <thead>
           <tr>
+            <th class="no-print"></th>
             <th>اسم العامل</th>
             <th>رصيد مرحّل من قبل</th>
             <th>مبلغ جديد هذا الشهر</th>
@@ -1736,9 +1789,10 @@ function renderCarryReport(){
             <th>المتبقي مرحّل للشهر القادم</th>
           </tr>
         </thead>
-        <tbody>${rowsHtml}</tbody>
+        <tbody>${rowsHtml || emptyRowHtml}</tbody>
         <tfoot>
           <tr>
+            <td class="no-print"></td>
             <td>الإجمالي</td>
             <td data-total="prev">0 ج</td>
             <td></td>
@@ -1753,12 +1807,12 @@ function renderCarryReport(){
   updateCarryTotals();
 }
 
-// بتعيد حساب صف الإجمالي تحت الجدول من بيانات العمال الحالية (بعد أي تعديل).
+// بتعيد حساب صف الإجمالي تحت الجدول من العمال الظاهرين في الكشف بس (مش كل العمال).
 function updateCarryTotals(){
   const foot = $('#carryReportContainer tfoot');
   if(!foot) return;
   let totalPrev = 0, totalBalance = 0, totalDeduct = 0, totalRemaining = 0;
-  workers.forEach(w => {
+  workers.filter(isCarryListed).forEach(w => {
     const r = computeWorker(w);
     totalPrev += r.carryPrev;
     totalBalance += r.carryBalance;
@@ -1793,7 +1847,24 @@ $('#carryReportContainer').addEventListener('input', async (e) => {
   tr.querySelector('[data-cell="remaining"]').textContent = fmt(r.carryRemaining) + ' ج';
   updateCarryTotals();
 
+
   await saveWorker(w);
+});
+
+// زرار حذف عامل من كشف الترحيلات (إخفاء فقط، مش مسح بياناته).
+$('#carryReportContainer').addEventListener('click', (e) => {
+  const btn = e.target.closest('.cr-del-row');
+  if(!btn) return;
+  const tr = btn.closest('tr[data-worker-id]');
+  if(!tr) return;
+  removeWorkerFromCarryReport(tr.dataset.workerId);
+});
+
+// اختيار عامل من قايمة "إضافة" وإضافته للكشف.
+$('#carryReportContainer').addEventListener('change', (e) => {
+  if(e.target && e.target.id === 'carryAddSelect' && e.target.value){
+    addWorkerToCarryReport(e.target.value);
+  }
 });
 
 function buildCardsInto(container, list, monthText){

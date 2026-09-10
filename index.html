@@ -297,7 +297,7 @@
     direction:ltr;
     text-align:left;
   }
-  #f_salary, #f_advanceAmount, #f_advanceDate, #f_absent, #f_discount, #f_overtime, #f_late, #f_carryPrev, #f_carryNew, #f_carryDeduct, #f_holiday, #f_joinDay{
+  #f_salary, #f_nationalId, #f_phone, #f_advanceAmount, #f_advanceDate, #f_absent, #f_discount, #f_overtime, #f_late, #f_carryPrev, #f_carryNew, #f_carryDeduct, #f_holiday, #f_joinDay{
     direction:ltr;
     text-align:left;
   }
@@ -732,6 +732,9 @@ function blankWorker(){
   return {
     id: uid(),
     name: 'عامل جديد',
+    nationalId: '',
+    phone: '',
+    appRegistered: false,
     salary: 0,
     overtimeText: '',
     lateText: '',
@@ -1138,7 +1141,7 @@ function renderSidebar(){
         <button class="arrow" data-dir="up" title="نقل لأعلى" ${idx === 0 ? 'disabled' : ''}>▲</button>
         <button class="arrow" data-dir="down" title="نقل لأسفل" ${idx === workers.length - 1 ? 'disabled' : ''}>▼</button>
       </div>
-      <span class="wi-name">${escapeHtml(w.name || 'بدون اسم')}</span>
+      <span class="wi-name">${w.appRegistered ? '🆕 ' : ''}${escapeHtml(w.name || 'بدون اسم')}</span>
       <span class="del" title="حذف">✕</span>`;
     div.querySelector('.wi-name').onclick = () => { activeId = w.id; currentScreen='form'; attMonthOffset = 0; renderAll(); };
     div.querySelectorAll('.arrow').forEach(btn => {
@@ -1382,6 +1385,17 @@ function renderForm(){
   container.innerHTML = `
     <div class="card">
       <input class="name-input" id="f_name" value="${escapeHtml(w.name)}" placeholder="اسم العامل">
+      ${w.appRegistered ? `<div class="hint" style="color:var(--warn,#C0392B); margin-top:6px;">⚠️ العامل ده سجل نفسه من التطبيق — راجع بياناته وحط مرتبه</div>` : ''}
+      <div class="row" style="margin-top:14px;">
+        <div>
+          <label>الرقم القومي</label>
+          <input type="text" inputmode="numeric" maxlength="14" id="f_nationalId" value="${escapeHtml(w.nationalId || '')}" placeholder="14 رقم" dir="ltr">
+        </div>
+        <div>
+          <label>رقم الموبايل</label>
+          <input type="text" inputmode="tel" id="f_phone" value="${escapeHtml(w.phone || '')}" placeholder="01xxxxxxxxx" dir="ltr">
+        </div>
+      </div>
       <div class="row" style="margin-top:14px;">
         <div>
           <label>المرتب الشهري (جنيه)</label>
@@ -1527,6 +1541,8 @@ function renderForm(){
     });
   };
   bind('#f_name', 'name');
+  bind('#f_nationalId', 'nationalId');
+  bind('#f_phone', 'phone');
   bindNumeric('#f_salary', 'salary');
   bindNumeric('#f_joinDay', 'joinDay');
   bind('#f_overtime', 'overtimeText');

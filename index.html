@@ -660,6 +660,8 @@
     <button class="secondary" id="archiveBtn">📁 الأرشيف</button>
     <button class="secondary" id="carryReportBtn">📋 كشف الترحيلات</button>
     <button class="secondary" id="rolloverBtn">ترحيل الأرصدة للشهر الجديد</button>
+    <button class="secondary" id="sentBtn">🗑️ القبض المرسل</button>
+    <button class="secondary" id="accessLogBtn">🕓 سجل الدخول</button>
     <button class="secondary" id="sendPayslipsBtn">📤 إرسال القبض للعمال</button>
     <button id="updateBtn">تحديث القبض</button>
     <button class="logout-btn" id="logoutBtn" title="تسجيل الخروج">⏻ خروج</button>
@@ -1174,6 +1176,7 @@ function renderSidebar(){
         return;
       }
       await deleteWorkerStorage(w.id);
+      try{ const q = await firestoreDb.collection('payslips').where('workerId','==',w.id).get(); q.forEach(d => d.ref.delete()); }catch(e){}
       workers = workers.filter(x => x.id !== w.id);
       await saveWorkerList();
       if(activeId === w.id) activeId = workers.length ? workers[0].id : null;
@@ -2193,6 +2196,51 @@ $('#updateBtn').addEventListener('click', async () => {
   renderAll();
 });
 
+async function openSentPanel(){
+  let docs = [];
+  try{
+    const snap = await firestoreDb.collection('payslips').get();
+    docs = snap.docs.slice().sort((a, b) => (b.data().sentAt || 0) - (a.data().sentAt || 0));
+  }catch(e){ alert('تعذر تحميل القبض المرسل.'); return; }
+  let ov = document.getElementById('sentOverlay');
+  if(!ov){ ov = document.createElement('div'); ov.id = 'sentOverlay'; document.body.appendChild(ov); }
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(13,23,64,.6);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.innerHTML = '<div style="background:#fff;border-radius:14px;padding:20px;max-width:520px;width:100%;max-height:80vh;overflow:auto"><h3 style="margin:0 0 6px;color:var(--navy)">القبض المرسل للعمال</h3><div class="hint" style="margin-bottom:12px">الحذف من هنا بيشيل الكشف من عند العامل فورًا. وإعادة الإرسال بتحدّث نفس الكشف من غير ما يتكرر.</div>' +
+    (docs.length ? docs.map(d => { const p = d.data(); return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px dashed var(--line);font-size:13px"><span>' + escapeHtml(p.name) + ' — ' + escapeHtml(p.label) + '</span><button class="att-nav-btn" data-del="' + d.id + '">🗑️ حذف</button></div>'; }).join('') + '<button class="att-nav-btn" id="sentDelAll" style="margin-top:10px;color:var(--warn)">🗑️ حذف الكل</button>' : '<div class="ql-empty">مفيش قبض مرسل</div>') +
+    '<button class="att-nav-btn" id="sentClose" style="margin-top:10px">إغلاق</button></div>';
+  ov.onclick = async (e) => {
+    const t = e.target;
+    if(t === ov || t.id === 'sentClose'){ ov.remove(); return; }
+    try{
+      if(t.dataset.del){
+        await firestoreDb.collection('payslips').doc(t.dataset.del).delete();
+        openSentPanel();
+      } else if(t.id === 'sentDelAll'){
+        if(!confirm('حذف كل القبض المرسل؟ العمال مش هيشوفوا أي كشف.')) return;
+        const b = firestoreDb.batch();
+        docs.forEach(d => b.delete(d.ref));
+        await b.commit();
+        openSentPanel();
+      }
+    }catch(err){ alert('تعذر الحذف.'); }
+  };
+}
+$('#sentBtn').addEventListener('click', openSentPanel);
+
+$('#accessLogBtn').addEventListener('click', async () => {
+  try{
+    const snap = await firestoreDb.collection('payroll_access_log').orderBy('at', 'desc').limit(50).get();
+    const rows = snap.docs.map(d => d.data());
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(13,23,64,.6);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.innerHTML = '<div style="background:#fff;border-radius:14px;padding:20px;max-width:520px;width:100%;max-height:80vh;overflow:auto"><h3 style="margin:0 0 12px;color:var(--navy)">سجل الدخول (آخر 50)</h3>' +
+      (rows.length ? rows.map(r => '<div style="padding:6px 0;border-bottom:1px dashed var(--line);font-size:13px;direction:ltr;text-align:right">' + (r.allowed ? '✅' : '⛔') + ' ' + escapeHtml(r.email) + ' — ' + new Date(r.at).toLocaleString('ar-EG') + '</div>').join('') : '<div class="ql-empty">مفيش سجل لسه</div>') +
+      '<button class="att-nav-btn" id="logClose" style="margin-top:12px">إغلاق</button></div>';
+    ov.onclick = (e) => { if(e.target === ov || e.target.id === 'logClose') ov.remove(); };
+    document.body.appendChild(ov);
+  }catch(e){ alert('تعذر تحميل السجل.'); }
+});
+
 $('#sendPayslipsBtn').addEventListener('click', async () => {
   const withEmail = workers.filter(w => workerEmail(w.nationalId));
   const without = workers.length - withEmail.length;
@@ -2344,6 +2392,12 @@ function startApp(){
     await auth.signOut();
   });
 
+  // سجل الدخول: بيسجّل أي حساب جوجل فتح البرنامج (سواء اتسمحله ولا لأ)
+  function logAccess(user, allowed){
+    return firestoreDb.collection('payroll_access_log').add({
+      email: user.email || '', uid: user.uid, allowed: !!allowed, at: Date.now()
+    }).catch(() => {});
+  }
   let denied = false;
   auth.onAuthStateChanged((user) => {
     setLoading(false);
@@ -2357,10 +2411,11 @@ function startApp(){
     if(!ALLOWED_EMAILS.includes((user.email || '').toLowerCase())){
       denied = true;
       showError('هذا الحساب غير مصرح له بالدخول.');
-      auth.signOut();
+      logAccess(user, false).finally(() => auth.signOut());
       return;
     }
     denied = false;
+    logAccess(user, true);
     gate.style.display = 'none';
     appRoot.style.display = 'block';
     currentUid = user.uid;

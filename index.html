@@ -661,6 +661,7 @@
     <button class="secondary" id="carryReportBtn">📋 كشف الترحيلات</button>
     <button class="secondary" id="rolloverBtn">ترحيل الأرصدة للشهر الجديد</button>
     <button class="secondary" id="sentBtn">🗑️ القبض المرسل</button>
+    <button class="secondary" id="backupBtn">💾 نسخة احتياطية</button>
     <button class="secondary" id="accessLogBtn">🕓 سجل الدخول</button>
     <button class="secondary" id="sendPayslipsBtn">📤 إرسال القبض للعمال</button>
     <button id="updateBtn">تحديث القبض</button>
@@ -2017,6 +2018,50 @@ async function saveArchiveForCurrentMonth(){
   }
 }
 
+// حضور شهر قديم يوم بيوم من نسخة الأرشيف (فاضي لو النسخة مفيهاش حضور يومي)
+function attForMonth(w, monthKey){
+  const log = w.dailyLog || {};
+  if(!Object.keys(log).length) return {};
+  const [y, m] = monthKey.split('-').map(Number), dim = new Date(y, m, 0).getDate(), att = {};
+  for(let d = 1; d <= dim; d++){
+    const key = monthKey + '-' + pad2(d);
+    if(key > todayKey()) break;
+    const rec = log[key] || {}, c = computeDay(key, rec);
+    const late = Math.round((c.lateMinutes || 0) + (c.earlyLeaveMinutes || 0));
+    let st = 'p';
+    if(c.holiday) st = 'h'; else if(c.weeklyOff) st = 'f'; else if(c.isAbsent) st = 'a'; else if(late > 0) st = 'l';
+    att[d] = { s: st, i: rec.in || '', o: rec.out || '', l: late, ot: Math.round(c.overtimeMinutes || 0) };
+  }
+  return att;
+}
+
+// إرسال شهر محفوظ في الأرشيف للعمال (بنفس مفتاح الشهر، فمفيش تكرار)
+async function sendArchiveMonth(key){
+  if(key === currentMonthKey()){ alert('ده الشهر الحالي — ابعته من زرار "📤 إرسال القبض للعمال" فوق عشان يتبعت بآخر بياناته.'); return; }
+  const raw = await storeGet('archive:' + key);
+  if(!raw){ alert('تعذر فتح الكشف.'); return; }
+  const data = JSON.parse(raw);
+  const list = data.workers.filter(w => workerEmail(w.nationalId));
+  if(!list.length){ alert('مفيش عامل في الكشف ده رقمه القومي مكتوب صح (14 رقم).'); return; }
+  const skipped = data.workers.length - list.length;
+  if(!confirm('هتبعت "' + data.label + '" لـ ' + list.length + ' عامل، وهيظهر عند كل واحد في شهوره السابقة.' + (skipped ? '\n(' + skipped + ' عامل من غير رقم قومي صحيح مش هيتبعتلهم)' : '') + '\nمتأكد؟')) return;
+  const pick = ['salary','joinDay','workedDays','baseSalary','overtimeHours','overtimeAmount','holidayDays','holidayAmount','lateHours','lateAmount','countedAbsentDays','absentAmount','advance','discount','carryPrev','carryNew','carryDeduct','carryRemaining','total'];
+  let ok = 0;
+  for(const w of list){
+    const r = w.computed || computeWorker(w), snap = {};
+    pick.forEach(k => snap[k] = Number(r[k]) || 0);
+    snap.discountReason = String(w.discountReason || '');
+    try{
+      await firestoreDb.collection('payslips').doc(key + '_' + w.id).set({
+        email: workerEmail(w.nationalId), workerId: w.id, name: w.name || '',
+        month: key, label: data.label, sentAt: Date.now(), r: snap, att: attForMonth(w, key)
+      });
+      ok++;
+    }catch(e){ console.error(e); }
+  }
+  alert('تم إرسال ' + ok + ' من ' + list.length + ' قبض عن ' + data.label + '.' + (ok < list.length ? ' فيه حاجات فشلت، راجع الاتصال والقواعد.' : ''));
+}
+
 async function renderArchiveGrid(){
   const grid = $('#archiveGrid');
   grid.innerHTML = '<div class="empty-state">جاري التحميل...</div>';
@@ -2034,7 +2079,8 @@ async function renderArchiveGrid(){
       const data = JSON.parse(raw);
       const box = document.createElement('div');
       box.className = 'archive-box';
-      box.innerHTML = `<span class="arc-del" title="حذف الكشف">✕</span><div class="ic">📋</div><div class="lbl">${escapeHtml(data.label)}</div><div class="cnt">${data.workers.length} عامل</div>`;
+      box.innerHTML = `<span class="arc-del" title="حذف الكشف">✕</span><div class="ic">📋</div><div class="lbl">${escapeHtml(data.label)}</div><div class="cnt">${data.workers.length} عامل</div><button type="button" class="arc-send" style="margin-top:8px;background:#f3941e;color:#1c1300;border:none;border-radius:8px;padding:6px 10px;font-weight:bold;font-size:12px;cursor:pointer">📤 إرسال للعمال</button>`;
+      box.querySelector('.arc-send').onclick = (e) => { e.stopPropagation(); sendArchiveMonth(key); };
       box.querySelector('.arc-del').onclick = (e) => {
         e.stopPropagation();
         deleteArchiveMonth(key, data.label);
@@ -2241,6 +2287,18 @@ $('#accessLogBtn').addEventListener('click', async () => {
   }catch(e){ alert('تعذر تحميل السجل.'); }
 });
 
+$('#backupBtn').addEventListener('click', async () => {
+  try{
+    const out = { exportedAt: new Date().toISOString(), payroll_app: {}, payslips: {} };
+    (await firestoreDb.collection('payroll_app').get()).forEach(d => out.payroll_app[d.id] = d.data());
+    (await firestoreDb.collection('payslips').get()).forEach(d => out.payslips[d.id] = d.data());
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(out)], {type: 'application/json'}));
+    a.download = 'payroll-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+    a.click();
+  }catch(e){ alert('تعذر عمل النسخة الاحتياطية.'); }
+});
+
 $('#sendPayslipsBtn').addEventListener('click', async () => {
   const withEmail = workers.filter(w => workerEmail(w.nationalId));
   const without = workers.length - withEmail.length;
@@ -2249,12 +2307,23 @@ $('#sendPayslipsBtn').addEventListener('click', async () => {
   let ok = 0;
   for(const w of withEmail){
     const r = computeWorker(w);
-    const pick = ['baseSalary','overtimeHours','overtimeAmount','holidayAmount','lateHours','lateAmount','absentAmount','advance','discount','carryDeduct','carryRemaining','total'];
+    const pick = ['salary','joinDay','workedDays','baseSalary','overtimeHours','overtimeAmount','holidayDays','holidayAmount','lateHours','lateAmount','countedAbsentDays','absentAmount','advance','discount','carryPrev','carryNew','carryDeduct','carryRemaining','total'];
     const snap = {}; pick.forEach(k => snap[k] = Number(r[k]) || 0);
+    snap.discountReason = String(w.discountReason || '');
+    // حضور الشهر يوم بيوم عشان العامل يشوفه في التقويم
+    const att = {};
+    try{
+      computeMonthlyAttendance(w, 0).rows.forEach(({key, rec, c}) => {
+        const late = Math.round((c.lateMinutes || 0) + (c.earlyLeaveMinutes || 0));
+        let st = 'p';
+        if(c.holiday) st = 'h'; else if(c.weeklyOff) st = 'f'; else if(c.isAbsent) st = 'a'; else if(late > 0) st = 'l';
+        att[Number(key.slice(8))] = { s: st, i: rec.in || '', o: rec.out || '', l: late, ot: Math.round(c.overtimeMinutes || 0) };
+      });
+    }catch(e){ console.error(e); }
     try{
       await firestoreDb.collection('payslips').doc(currentMonthKey() + '_' + w.id).set({
         email: workerEmail(w.nationalId), workerId: w.id, name: w.name || '',
-        month: currentMonthKey(), label: currentMonthLabel(), sentAt: Date.now(), r: snap
+        month: currentMonthKey(), label: currentMonthLabel(), sentAt: Date.now(), r: snap, att: att
       });
       ok++;
     }catch(e){ console.error(e); }

@@ -1573,8 +1573,10 @@ function renderForm(){
       await sec.auth().createUserWithEmailAndPassword(em, pw);
       try{ await sec.auth().currentUser.updateProfile({displayName: w.name || ''}); }catch(_){}
       await sec.auth().signOut();
+      await saveProfileDoc(w, em);
       alert('تم إنشاء حساب الدخول. العامل يدخل بالرقم القومي وكلمة السر دي.');
     }catch(e){
+      if(e.code === 'auth/email-already-in-use'){ try{ await saveProfileDoc(w, em); alert('الحساب موجود قبل كده. تم تثبيت اسم العامل عنده.'); return; }catch(_){} }
       alert(e.code === 'auth/email-already-in-use'
         ? 'فيه حساب بالرقم القومي ده قبل كده. لو إنت مش اللي عملته، امسحه من Firebase Authentication وأنشئه من هنا.'
         : 'تعذر إنشاء الحساب. تأكد إن الدخول بالإيميل وكلمة السر متفعّل في Firebase.');
@@ -2243,11 +2245,16 @@ $('#updateBtn').addEventListener('click', async () => {
   renderAll();
 });
 
+// وثيقة اسم ثابتة للعامل (بتظهر له حتى قبل أول كشف). مش بتتعرض في قايمة القبض المرسل.
+async function saveProfileDoc(w, em){
+  await firestoreDb.collection('payslips').doc('profile_' + w.id).set({ email: em, workerId: w.id, name: w.name || '', month: '0000-00', label: '', sentAt: 0, _profile: true });
+}
+
 async function openSentPanel(){
   let docs = [];
   try{
     const snap = await firestoreDb.collection('payslips').get();
-    docs = snap.docs.slice().sort((a, b) => (b.data().sentAt || 0) - (a.data().sentAt || 0));
+    docs = snap.docs.filter(d => !d.data()._profile).slice().sort((a, b) => (b.data().sentAt || 0) - (a.data().sentAt || 0));
   }catch(e){ alert('تعذر تحميل القبض المرسل.'); return; }
   let ov = document.getElementById('sentOverlay');
   if(!ov){ ov = document.createElement('div'); ov.id = 'sentOverlay'; document.body.appendChild(ov); }

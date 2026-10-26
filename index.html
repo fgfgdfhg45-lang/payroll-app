@@ -2372,10 +2372,24 @@ function startApp(){
       // بنستخدم signInWithRedirect بدل signInWithPopup عشان نتجنب تحذيرات
       // Cross-Origin-Opener-Policy اللي بتظهر مع نوافذ الـ popup في المتصفحات الحديثة.
       // النتيجة بترجع لاحقًا عن طريق getRedirectResult تحت.
-      await auth.signInWithRedirect(provider);
+      // popup أولاً (الـ redirect بيضيع على المتصفحات الحديثة لما الموقع على دومين غير دومين Firebase)
+      try{
+        await auth.signInWithPopup(provider);
+      }catch(pe){
+        if(pe && (pe.code === 'auth/popup-blocked' || pe.code === 'auth/operation-not-supported-in-this-environment')){
+          await auth.signInWithRedirect(provider);
+        }else if(pe && (pe.code === 'auth/popup-closed-by-user' || pe.code === 'auth/cancelled-popup-request')){
+          setLoading(false);
+        }else if(pe && pe.code === 'auth/unauthorized-domain'){
+          setLoading(false);
+          showError('الدومين ده مش مضاف في Firebase ← Authentication ← Settings ← Authorized domains.');
+        }else{
+          throw pe;
+        }
+      }
     }catch(e){
       setLoading(false);
-      showError('حصل خطأ أثناء تسجيل الدخول. حاول تاني.');
+      showError('حصل خطأ أثناء تسجيل الدخول (' + ((e && e.code) || 'unknown') + '). حاول تاني.');
     }
   });
 

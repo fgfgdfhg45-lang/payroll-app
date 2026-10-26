@@ -660,6 +660,7 @@
     <button class="secondary" id="archiveBtn">📁 الأرشيف</button>
     <button class="secondary" id="carryReportBtn">📋 كشف الترحيلات</button>
     <button class="secondary" id="rolloverBtn">ترحيل الأرصدة للشهر الجديد</button>
+    <button class="secondary" id="sendPayslipsBtn">📤 إرسال القبض للعمال</button>
     <button id="updateBtn">تحديث القبض</button>
     <button class="logout-btn" id="logoutBtn" title="تسجيل الخروج">⏻ خروج</button>
   </div>
@@ -761,6 +762,12 @@ const DELETE_WORKER_PASSWORD = 'شافعي2024';
 // لو لأي سبب لسه مفيش تسجيل دخول (نظريًا مينفعش يحصل بسبب بوابة الدخول)،
 // بيرجع مؤقتًا لـ localStorage كخط دفاع أخير عشان البرنامج ميقعش.
 let firestoreDb = null;
+// إيميل دخول العامل بيتبني من الرقم القومي (14 رقم) + دومين داخلي
+const WORKER_DOMAIN = '@workers.payroll.app';
+function workerEmail(nid){
+  const d = String(nid || '').replace(/[٠-٩]/g, c => '٠١٢٣٤٥٦٧٨٩'.indexOf(c)).replace(/\D/g, '');
+  return d.length === 14 ? d + WORKER_DOMAIN : '';
+}
 let currentUid = null;
 
 // ملحوظة مهمة: مسار التخزين هنا ثابت (payroll_app) ومش معتمد على UID بتاع
@@ -1398,6 +1405,13 @@ function renderForm(){
       </div>
       <div class="row" style="margin-top:14px;">
         <div>
+          <label>دخول العامل لكشف قبضه (بالرقم القومي + كلمة سر)</label>
+          <button type="button" id="mkAccBtn" class="att-nav-btn" style="width:100%;padding:10px;">🔑 إنشاء حساب دخول للعامل</button>
+          <div class="hint">اكتب الرقم القومي (14 رقم) الأول، وبعدها اكتب كلمة السر اللي هتديهاله.</div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:14px;">
+        <div>
           <label>المرتب الشهري (جنيه)</label>
           <input type="text" inputmode="decimal" id="f_salary" value="${w.salary}" dir="ltr">
         </div>
@@ -1543,6 +1557,24 @@ function renderForm(){
   bind('#f_name', 'name');
   bind('#f_nationalId', 'nationalId');
   bind('#f_phone', 'phone');
+  $('#mkAccBtn').addEventListener('click', async () => {
+    const em = workerEmail(w.nationalId);
+    if(!em){ alert('اكتب الرقم القومي (14 رقم) للعامل الأول.'); return; }
+    const pw = prompt('اكتب كلمة سر لـ ' + (w.name || 'العامل') + ' (6 أحرف على الأقل):');
+    if(pw === null) return;
+    if(pw.length < 6){ alert('كلمة السر لازم 6 أحرف على الأقل.'); return; }
+    let sec;
+    try{
+      sec = firebase.initializeApp(firebase.app().options, 'sec' + Date.now());
+      await sec.auth().createUserWithEmailAndPassword(em, pw);
+      await sec.auth().signOut();
+      alert('تم إنشاء حساب الدخول. العامل يدخل بالرقم القومي وكلمة السر دي.');
+    }catch(e){
+      alert(e.code === 'auth/email-already-in-use'
+        ? 'فيه حساب بالرقم القومي ده قبل كده. لو إنت مش اللي عملته، امسحه من Firebase Authentication وأنشئه من هنا.'
+        : 'تعذر إنشاء الحساب. تأكد إن الدخول بالإيميل وكلمة السر متفعّل في Firebase.');
+    }finally{ if(sec) sec.delete(); }
+  });
   bindNumeric('#f_salary', 'salary');
   bindNumeric('#f_joinDay', 'joinDay');
   bind('#f_overtime', 'overtimeText');
@@ -2161,6 +2193,27 @@ $('#updateBtn').addEventListener('click', async () => {
   renderAll();
 });
 
+$('#sendPayslipsBtn').addEventListener('click', async () => {
+  const withEmail = workers.filter(w => workerEmail(w.nationalId));
+  const without = workers.length - withEmail.length;
+  if(!withEmail.length){ alert('مفيش عامل رقمه القومي مكتوب صح (14 رقم).'); return; }
+  if(!confirm('هتبعت ' + currentMonthLabel() + ' لـ ' + withEmail.length + ' عامل، وكل عامل هيشوف قبضه هو بس.' + (without ? '\n(' + without + ' عامل من غير رقم قومي صحيح مش هيتبعتلهم)' : '') + '\nمتأكد؟')) return;
+  let ok = 0;
+  for(const w of withEmail){
+    const r = computeWorker(w);
+    const pick = ['baseSalary','overtimeHours','overtimeAmount','holidayAmount','lateHours','lateAmount','absentAmount','advance','discount','carryDeduct','carryRemaining','total'];
+    const snap = {}; pick.forEach(k => snap[k] = Number(r[k]) || 0);
+    try{
+      await firestoreDb.collection('payslips').doc(currentMonthKey() + '_' + w.id).set({
+        email: workerEmail(w.nationalId), workerId: w.id, name: w.name || '',
+        month: currentMonthKey(), label: currentMonthLabel(), sentAt: Date.now(), r: snap
+      });
+      ok++;
+    }catch(e){ console.error(e); }
+  }
+  alert('تم إرسال ' + ok + ' من ' + withEmail.length + ' قبض.' + (ok < withEmail.length ? ' فيه حاجات فشلت، راجع الاتصال والقواعد.' : ''));
+});
+
 $('#closeCardsBtn').addEventListener('click', () => {
   currentScreen = 'form';
   renderAll();
@@ -2222,7 +2275,8 @@ function startApp(){
 (function(){
   // ضيف أي إيميل جديد هنا بنفس الطريقة (بين علامتي تنصيص وفاصلة بعده)
   const ALLOWED_EMAILS = [
-    'fgfgdfhg315@gmail.com'
+    'fgfgdfhg315@gmail.com',
+    'alshafystyl@gmail.com'
   ];
 
   const firebaseConfig = {
@@ -2290,20 +2344,29 @@ function startApp(){
     await auth.signOut();
   });
 
+  let denied = false;
   auth.onAuthStateChanged((user) => {
-    // ملحوظة: الحماية بالإيميل اتشالت مؤقتًا. البرنامج بيفتح لأي حد عنده الرابط.
     setLoading(false);
-    clearError();
+    if(!denied) clearError();
+    if(!user){
+      if(appStarted){ location.reload(); return; }
+      gate.style.display = 'flex';
+      appRoot.style.display = 'none';
+      return;
+    }
+    if(!ALLOWED_EMAILS.includes((user.email || '').toLowerCase())){
+      denied = true;
+      showError('هذا الحساب غير مصرح له بالدخول.');
+      auth.signOut();
+      return;
+    }
+    denied = false;
     gate.style.display = 'none';
     appRoot.style.display = 'block';
-    currentUid = (user && user.uid) ? user.uid : 'public';
+    currentUid = user.uid;
     if(!appStarted){
       appStarted = true;
-      if(user){
-        migrateLocalDataToFirestoreIfNeeded().finally(startApp);
-      } else {
-        startApp();
-      }
+      migrateLocalDataToFirestoreIfNeeded().finally(startApp);
     }
   });
 })();

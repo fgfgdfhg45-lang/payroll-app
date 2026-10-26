@@ -2077,6 +2077,10 @@ async function sendArchiveMonth(key){
   const raw = await storeGet('archive:' + key);
   if(!raw){ alert('تعذر فتح الكشف.'); return; }
   const data = JSON.parse(raw);
+  // الرقم القومي بيتسحب من بيانات العمال الحالية (بنفس الـ id، وإلا بنفس الاسم) لو الأرشيف مفيهوش رقم صالح
+  const cur = {}, curByName = {};
+  workers.forEach(x => { if(workerEmail(x.nationalId)){ cur[x.id] = x.nationalId; if(x.name) curByName[String(x.name).trim()] = x.nationalId; } });
+  data.workers.forEach(w => { if(!workerEmail(w.nationalId)){ const n = cur[w.id] || curByName[String(w.name || '').trim()]; if(n) w.nationalId = n; } });
   const list = data.workers.filter(w => workerEmail(w.nationalId));
   if(!list.length){ alert('مفيش عامل في الكشف ده رقمه القومي مكتوب صح (14 رقم).'); return; }
   const skipped = data.workers.length - list.length;

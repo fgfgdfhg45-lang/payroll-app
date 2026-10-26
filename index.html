@@ -1571,6 +1571,7 @@ function renderForm(){
     try{
       sec = firebase.initializeApp(firebase.app().options, 'sec' + Date.now());
       await sec.auth().createUserWithEmailAndPassword(em, pw);
+      try{ await sec.auth().currentUser.updateProfile({displayName: w.name || ''}); }catch(_){}
       await sec.auth().signOut();
       alert('تم إنشاء حساب الدخول. العامل يدخل بالرقم القومي وكلمة السر دي.');
     }catch(e){

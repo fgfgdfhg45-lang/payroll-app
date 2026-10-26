@@ -2408,7 +2408,9 @@ function startApp(){
       appRoot.style.display = 'none';
       return;
     }
-    if(!ALLOWED_EMAILS.includes((user.email || '').toLowerCase())){
+    // أي حساب جوجل مسموح له، لكن حسابات العمال (إيميل/كلمة سر) ممنوعة من برنامج الإدارة
+    const isGoogle = (user.providerData || []).some(pd => pd.providerId === 'google.com');
+    if(!isGoogle){
       denied = true;
       showError('هذا الحساب غير مصرح له بالدخول.');
       logAccess(user, false).finally(() => auth.signOut());

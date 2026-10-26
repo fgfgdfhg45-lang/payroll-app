@@ -841,6 +841,7 @@ async function loadAll(){
         if(wraw){
           const w = JSON.parse(wraw);
           if(!w.dailyLog) w.dailyLog = {};
+          if(!w.nationalId){ const bk = idBackupGet(w.id); if(bk){ w.nationalId = bk; saveWorker(w); } }
           if(!Array.isArray(w.advanceLog)){
             // ترحيل أي رصيد سلف قديم كان متسجل كرقم واحد بس (النظام القديم) إلى سطر
             // واحد في سجل السلف الجديد، عشان معلومة السلف القديمة متضاعش.
@@ -1050,9 +1051,29 @@ async function saveWorkerList(){
   await storeSet('workers-list', JSON.stringify(ids));
 }
 
-async function saveWorker(w){
-  await storeSet('worker:' + w.id, JSON.stringify(w));
+// opts.allowClear = true بس لما المستخدم يمسح الرقم/الموبايل بإيده من الخانة.
+// غير كده: لو النسخة اللي عندنا فاضية والمخزّن فيه رقم قومي أو موبايل، بنحافظ عليه
+// (بيحمي من نسخة قديمة مفتوحة على جهاز تاني تمسح الرقم بالغلط).
+async function saveWorker(w, opts){
+  const allowClear = !!(opts && opts.allowClear);
+  if(!allowClear && (!w.nationalId || !w.phone)){
+    try{
+      const raw = await storeGet('worker:' + w.id);
+      if(raw){
+        const old = JSON.parse(raw);
+        if(!w.nationalId && old.nationalId) w.nationalId = old.nationalId;
+        if(!w.phone && old.phone) w.phone = old.phone;
+      }
+    }catch(e){}
+  }
+  const ok = await storeSet('worker:' + w.id, JSON.stringify(w));
+  if(w.nationalId){ idBackupSet(w.id, w.nationalId); }
+  return ok;
 }
+
+// نسخة احتياطية محلية لأرقام العمال القومية (على نفس الجهاز) تتستخدم لو الرقم رجع فاضي من السحابة
+function idBackupGet(id){ try{ return localStorage.getItem('payroll:idbackup:' + id) || ''; }catch(e){ return ''; } }
+function idBackupSet(id, nid){ try{ localStorage.setItem('payroll:idbackup:' + id, nid); }catch(e){} }
 
 async function deleteWorkerStorage(id){
   await storeDelete('worker:' + id);
@@ -1401,6 +1422,7 @@ function renderForm(){
         <div>
           <label>الرقم القومي</label>
           <input type="text" inputmode="numeric" maxlength="14" id="f_nationalId" value="${escapeHtml(w.nationalId || '')}" placeholder="14 رقم" dir="ltr">
+          <div id="idSaveState" class="hint" style="margin-top:4px;min-height:16px;">${workerEmail(w.nationalId) ? '<span style="color:var(--good)">✓ الرقم محفوظ</span>' : ''}</div>
         </div>
         <div>
           <label>رقم الموبايل</label>
@@ -1559,7 +1581,18 @@ function renderForm(){
     });
   };
   bind('#f_name', 'name');
-  bind('#f_nationalId', 'nationalId');
+  $('#f_nationalId').addEventListener('input', async (e) => {
+    w.nationalId = e.target.value;
+    const st = $('#idSaveState');
+    if(st) st.innerHTML = '<span style="color:var(--muted)">جاري الحفظ...</span>';
+    const ok = await saveWorker(w, { allowClear: true });
+    if(st){
+      if(ok === false) st.innerHTML = '<span style="color:var(--warn)">تعذر الحفظ في السحابة — اتأكد من الإنترنت وإنك مسجل دخول</span>';
+      else if(workerEmail(w.nationalId)) st.innerHTML = '<span style="color:var(--good)">✓ الرقم محفوظ</span>';
+      else st.innerHTML = w.nationalId ? '<span style="color:var(--muted)">كمّل لحد 14 رقم</span>' : '';
+    }
+    renderSidebar();
+  });
   bind('#f_phone', 'phone');
   $('#mkAccBtn').addEventListener('click', async () => {
     const em = workerEmail(w.nationalId);
@@ -2310,8 +2343,8 @@ $('#backupBtn').addEventListener('click', async () => {
 $('#sendPayslipsBtn').addEventListener('click', async () => {
   const withEmail = workers.filter(w => workerEmail(w.nationalId));
   const without = workers.length - withEmail.length;
-  if(!withEmail.length){ alert('مفيش عامل رقمه القومي مكتوب صح (14 رقم).'); return; }
-  if(!confirm('هتبعت ' + currentMonthLabel() + ' لـ ' + withEmail.length + ' عامل، وكل عامل هيشوف قبضه هو بس.' + (without ? '\n(' + without + ' عامل من غير رقم قومي صحيح مش هيتبعتلهم)' : '') + '\nمتأكد؟')) return;
+  if(!withEmail.length){ alert('مفيش عامل رقمه القومي مكتوب صح (14 رقم).\nالعمال الناقصين: ' + workers.map(x => x.name || 'بدون اسم').join('، ')); return; }
+  if(!confirm('هتبعت ' + currentMonthLabel() + ' لـ ' + withEmail.length + ' عامل، وكل عامل هيشوف قبضه هو بس.' + (without ? '\n(' + without + ' عامل من غير رقم قومي صحيح مش هيتبعتلهم: ' + workers.filter(x => !workerEmail(x.nationalId)).map(x => x.name || 'بدون اسم').join('، ') + ')' : '') + '\nمتأكد؟')) return;
   let ok = 0;
   for(const w of withEmail){
     const r = computeWorker(w);
